@@ -38,6 +38,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.ql.CompilationOpContext;
 import org.apache.hadoop.hive.ql.ErrorMsg;
+import org.apache.hadoop.hive.ql.exec.ghive.GPUResult;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.mr.ExecMapperContext;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.lib.Node;
@@ -65,9 +67,43 @@ import org.slf4j.LoggerFactory;
  * Base operator implementation.
  **/
 public abstract class Operator<T extends OperatorDesc> implements Serializable,Cloneable,
-  Node {
+        Node {
 
   // Bean methods
+//  static {
+//    if (InfoCollector.isGPU) {
+//      System.load("/tmp/org_apache_hadoop_hive_ql_exec_Operator.so");
+//      try {
+//        // invoke dynamic link library
+//      } catch (Exception e) {
+//        System.err.println("load native library [operator] failed.");
+//      }
+//      System.out.println("111:load native library [operator] succeed.");
+//    }
+//  }
+//  public static native GPUResult GPUProcess(String thisVertexName, long[][] longCols, double[][] doubleCols,
+//                                            String[] vertexName, int[][] sequence, int[] longColumnCnt,
+//                                            int[] doubleColumnCnt, int[] keyCnt, int[] rowCnt);
+  public static native GPUResult GPUProcess(String thisVertexName,long[][] longCols,
+                                                                   double[][] doubleCols,
+                                                                   int[][] intCols,
+                                                                   String[][] stringCols,
+                                                                   String[] vertexName,
+                                                                   int[][] Sequence,
+                                                                   int[] longColumnCnt,
+                                                                   int[] doubleColumnCnt,
+                                                                   int[] intColumnCnt,
+                                                                   int[] stringColumnCnt,
+                                                                   int[] keyCnt,
+                                                                   int[] rowCnt,
+                                                                   String retainListMapString);
+  public long startTime;
+  public long endTime;
+
+  public long processStartTime;
+  public long totalProcessTime;
+
+
 
   private static final long serialVersionUID = 1L;
 
@@ -147,7 +183,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   }
 
   public void setChildOperators(
-      List<Operator<? extends OperatorDesc>> childOperators) {
+          List<Operator<? extends OperatorDesc>> childOperators) {
     if (childOperators == null) {
       childOperators = new ArrayList<Operator<? extends OperatorDesc>>();
     }
@@ -184,7 +220,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   }
 
   public void setParentOperators(
-      List<Operator<? extends OperatorDesc>> parentOperators) {
+          List<Operator<? extends OperatorDesc>> parentOperators) {
     if (parentOperators == null) {
       parentOperators = new ArrayList<Operator<? extends OperatorDesc>>();
     }
@@ -323,7 +359,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    */
   @SuppressWarnings("unchecked")
   public final void initialize(Configuration hconf, ObjectInspector[] inputOIs)
-      throws HiveException {
+          throws HiveException {
 
     // String className = this.getClass().getName();
 
@@ -357,7 +393,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
     childOperatorsTag = new int[childOperatorsArray.length];
     for (int i = 0; i < childOperatorsArray.length; i++) {
       List<Operator<? extends OperatorDesc>> parentOperators =
-          childOperatorsArray[i].getParentOperators();
+              childOperatorsArray[i].getParentOperators();
       childOperatorsTag[i] = parentOperators.indexOf(this);
       if (childOperatorsTag[i] == -1) {
         throw new HiveException("Hive internal error: cannot find parent in the child operator!");
@@ -376,7 +412,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
       initializeOp(hconf);
       // sanity checks
       if (!rootInitializeCalled
-          || childOperatorsArray.length != childOperators.size()) {
+              || childOperatorsArray.length != childOperators.size()) {
         throw new AssertionError("Internal error during operator initialization");
       }
       if (LOG.isDebugEnabled()) {
@@ -496,6 +532,8 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   protected void initializeOp(Configuration hconf) throws HiveException {
     this.hconf = hconf;
     rootInitializeCalled = true;
+    processStartTime = 0;
+    totalProcessTime = 0;
   }
 
   public String getCounterName(Counter counter, Configuration hconf) {
@@ -540,7 +578,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   public void passExecContext(ExecMapperContext execContext) {
     this.setExecContext(execContext);
     for (int i = 0; i < childOperators.size(); i++) {
-        childOperators.get(i).passExecContext(execContext);
+      childOperators.get(i).passExecContext(execContext);
     }
   }
 
@@ -556,7 +594,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    * @throws HiveException
    */
   protected void initialize(Configuration hconf, ObjectInspector inputOI,
-      int parentId) throws HiveException {
+                            int parentId) throws HiveException {
     if (LOG.isDebugEnabled()) {
       LOG.debug("Initializing child " + id + " " + getName());
     }
@@ -771,13 +809,15 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    * should overwrite this funtion for their specific cleanup routine.
    */
   protected void closeOp(boolean abort) throws HiveException {
+    LOG.info("the Operator [" + getOperatorId() + "] takes time: " + (totalProcessTime / 1000000));
+    processStartTime = 0;
   }
 
   private boolean jobCloseDone = false;
 
   // Operator specific logic goes here
   public void jobCloseOp(Configuration conf, boolean success)
-      throws HiveException {
+          throws HiveException {
   }
 
   /**
@@ -790,7 +830,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    *          whether the job was completed successfully or not
    */
   public void jobClose(Configuration conf, boolean success)
-      throws HiveException {
+          throws HiveException {
     // JobClose has already been performed on this operator
     if (jobCloseDone) {
       return;
@@ -823,7 +863,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    *          the new child
    */
   public void replaceChild(Operator<? extends OperatorDesc> child,
-      Operator<? extends OperatorDesc> newChild) {
+                           Operator<? extends OperatorDesc> newChild) {
     int childIndex = childOperators.indexOf(child);
     assert childIndex != -1;
     childOperators.set(childIndex, newChild);
@@ -854,16 +894,16 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    * @throws SemanticException
    */
   public void removeChildAndAdoptItsChildren(
-    Operator<? extends OperatorDesc> child) throws SemanticException {
+          Operator<? extends OperatorDesc> child) throws SemanticException {
     int childIndex = childOperators.indexOf(child);
     if (childIndex == -1) {
       throw new SemanticException(
-          "Exception when trying to remove partition predicates: fail to find child from parent");
+              "Exception when trying to remove partition predicates: fail to find child from parent");
     }
 
     childOperators.remove(childIndex);
     if (child.getChildOperators() != null &&
-        child.getChildOperators().size() > 0) {
+            child.getChildOperators().size() > 0) {
       childOperators.addAll(childIndex, child.getChildOperators());
     }
 
@@ -872,7 +912,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
       int index = parents.indexOf(child);
       if (index == -1) {
         throw new SemanticException(
-          "Exception when trying to remove partition predicates: fail to find parent from child");
+                "Exception when trying to remove partition predicates: fail to find parent from child");
       }
       parents.set(index, this);
     }
@@ -906,7 +946,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    *          the new parent
    */
   public void replaceParent(Operator<? extends OperatorDesc> parent,
-      Operator<? extends OperatorDesc> newParent) {
+                            Operator<? extends OperatorDesc> newParent) {
     int parentIndex = parentOperators.indexOf(parent);
     assert parentIndex != -1;
     parentOperators.set(parentIndex, newParent);
@@ -924,31 +964,41 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   }
 
   protected void forward(Object row, ObjectInspector rowInspector)
-      throws HiveException {
+          throws HiveException {
     forward(row, rowInspector, false);
   }
 
   protected void forward(VectorizedRowBatch vrg, ObjectInspector rowInspector)
-      throws HiveException {
+          throws HiveException {
     forward(vrg, rowInspector, true);
   }
 
+  private static int logNum = 0;
+
   protected void forward(Object row, ObjectInspector rowInspector, boolean isVectorized)
-      throws HiveException {
+          throws HiveException {
+//    if (logNum++ < 100) LOG.info("Forward: " + row.toString() + " " + row.getClass().getCanonicalName() + " " + ((isVectorized) ? "Vect" : ""));
+    if (processStartTime != 0) {
+      long processEndTime = System.nanoTime();
+      totalProcessTime += processEndTime - processStartTime;
+      processStartTime = 0;
+    } else {
+      processStartTime = System.nanoTime();
+    }
     if (isVectorized) {
       vectorForward((VectorizedRowBatch) row, rowInspector);
     } else {
       baseForward(row, rowInspector);
     }
+    processStartTime = System.nanoTime();
   }
 
   private void vectorForward(VectorizedRowBatch vrg, ObjectInspector rowInspector)
-      throws HiveException {
+          throws HiveException {
     this.runTimeNumRows += vrg.count();
     if (getDone()) {
       return;
     }
-
     // Data structures to store original values
     final int size = vrg.size;
     final boolean selectedInUse = vrg.selectedInUse;
@@ -980,7 +1030,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   }
 
   private void baseForward(Object row, ObjectInspector rowInspector)
-      throws HiveException {
+          throws HiveException {
     this.runTimeNumRows++;
     if (getDone()) {
       return;
@@ -1124,7 +1174,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    * ObjectInspectors.
    */
   protected static ObjectInspector[] initEvaluators(ExprNodeEvaluator<?>[] evals,
-      ObjectInspector rowInspector) throws HiveException {
+                                                    ObjectInspector rowInspector) throws HiveException {
     ObjectInspector[] result = new ObjectInspector[evals.length];
     for (int i = 0; i < evals.length; i++) {
       result[i] = evals[i].initialize(rowInspector);
@@ -1137,8 +1187,8 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    * and return the result ObjectInspectors.
    */
   protected static ObjectInspector[] initEvaluators(ExprNodeEvaluator<?>[] evals,
-      int start, int length,
-      ObjectInspector rowInspector) throws HiveException {
+                                                    int start, int length,
+                                                    ObjectInspector rowInspector) throws HiveException {
     ObjectInspector[] result = new ObjectInspector[length];
     for (int i = 0; i < length; i++) {
       result[i] = evals[start + i].initialize(rowInspector);
@@ -1151,12 +1201,12 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    * StructObjectInspector with integer field names.
    */
   protected static StructObjectInspector initEvaluatorsAndReturnStruct(
-      ExprNodeEvaluator<?>[] evals, List<String> outputColName,
-      ObjectInspector rowInspector) throws HiveException {
+          ExprNodeEvaluator<?>[] evals, List<String> outputColName,
+          ObjectInspector rowInspector) throws HiveException {
     ObjectInspector[] fieldObjectInspectors = initEvaluators(evals,
-        rowInspector);
+            rowInspector);
     return ObjectInspectorFactory.getStandardStructObjectInspector(
-        outputColName, Arrays.asList(fieldObjectInspectors));
+            outputColName, Arrays.asList(fieldObjectInspectors));
   }
 
   protected transient Object groupKeyObject;
@@ -1253,11 +1303,11 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
 
   @Override
   public Operator<? extends OperatorDesc> clone()
-    throws CloneNotSupportedException {
+          throws CloneNotSupportedException {
 
     List<Operator<? extends OperatorDesc>> parents = getParentOperators();
     List<Operator<? extends OperatorDesc>> parentClones =
-      new ArrayList<Operator<? extends OperatorDesc>>();
+            new ArrayList<Operator<? extends OperatorDesc>>();
 
     if (parents != null) {
       for (Operator<? extends OperatorDesc> parent : parents) {
@@ -1292,7 +1342,7 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
   public Operator<? extends OperatorDesc> cloneOp() throws CloneNotSupportedException {
     T descClone = (T) conf.clone();
     Operator<? extends OperatorDesc> ret =
-        OperatorFactory.getAndMakeChild(cContext, descClone, getSchema());
+            OperatorFactory.getAndMakeChild(cContext, descClone, getSchema());
     return ret;
   }
 
@@ -1305,15 +1355,15 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    * @throws CloneNotSupportedException
    */
   public Operator<? extends OperatorDesc> cloneRecursiveChildren()
-      throws CloneNotSupportedException {
+          throws CloneNotSupportedException {
     Operator<? extends OperatorDesc> newOp = this.cloneOp();
     newOp.setParentOperators(this.parentOperators);
     List<Operator<? extends OperatorDesc>> newChildren =
-        new ArrayList<Operator<? extends OperatorDesc>>();
+            new ArrayList<Operator<? extends OperatorDesc>>();
 
     for (Operator<? extends OperatorDesc> childOp : this.getChildOperators()) {
       List<Operator<? extends OperatorDesc>> parentList =
-          new ArrayList<Operator<? extends OperatorDesc>>();
+              new ArrayList<Operator<? extends OperatorDesc>>();
       for (Operator<? extends OperatorDesc> parent : childOp.getParentOperators()) {
         if (parent.equals(this)) {
           parentList.add(newOp);
@@ -1594,8 +1644,8 @@ public abstract class Operator<T extends OperatorDesc> implements Serializable,C
    */
   public boolean logicalEquals(Operator other) {
     return getClass().getName().equals(other.getClass().getName()) &&
-        (conf == other.getConf() || (conf != null && other.getConf() != null &&
-            conf.isSame(other.getConf())));
+            (conf == other.getConf() || (conf != null && other.getConf() != null &&
+                    conf.isSame(other.getConf())));
   }
 
   /**

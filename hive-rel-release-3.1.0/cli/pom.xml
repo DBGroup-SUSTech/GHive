@@ -109,6 +109,11 @@
       <version>${hadoop.version}</version>
       <optional>true</optional>
     </dependency>
+    <dependency>
+      <groupId>com.alibaba</groupId>
+      <artifactId>fastjson</artifactId>
+      <version>1.2.47</version>
+    </dependency>
    <!-- test inter-project -->
     <dependency>
       <groupId>org.apache.hbase</groupId>

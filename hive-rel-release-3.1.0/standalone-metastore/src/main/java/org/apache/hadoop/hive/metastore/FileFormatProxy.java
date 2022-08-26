@@ -23,7 +23,9 @@ import java.util.List;
 
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hive.metastore.Metastore.SplitInfos;
+import org.apache.hadoop.hive.metastore.Metastore
+
+        .SplitInfos;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 
 /**

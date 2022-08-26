@@ -19,14 +19,15 @@ package org.apache.hadoop.hive.ql.exec.tez;
 
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import org.apache.hadoop.hive.llap.LlapDaemonInfo;
 import org.apache.hadoop.hive.ql.exec.MemoryMonitorInfo;
+import org.apache.hadoop.hive.ql.exec.ghive.BroadCastDataFlow;
+import org.apache.hadoop.hive.ql.exec.ghive.BroadCastGPUInput;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.mapjoin.MapJoinMemoryExhaustionError;
+import org.apache.hadoop.hive.serde2.lazybinary.LazyBinaryStruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -272,6 +273,237 @@ public class HashTableLoader implements org.apache.hadoop.hive.ql.exec.HashTable
       }
     }
   }
+
+  public void GPUSmallLoad(MapJoinTableContainer[] mapJoinTables,
+                   MapJoinTableContainerSerDe[] mapJoinTableSerdes)
+          throws HiveException {
+
+    Map<Integer, String> parentToInput = desc.getParentToInput();
+    Map<Integer, Long> parentKeyCounts = desc.getParentKeyCounts();
+
+    boolean isCrossProduct = false;
+    List<ExprNodeDesc> joinExprs = desc.getKeys().values().iterator().next();
+    if (joinExprs.size() == 0) {
+      isCrossProduct = true;
+    }
+
+    boolean useOptimizedTables = HiveConf.getBoolVar(
+            hconf, HiveConf.ConfVars.HIVEMAPJOINUSEOPTIMIZEDTABLE);
+    boolean useHybridGraceHashJoin = desc.isHybridHashJoin();
+    boolean isFirstKey = true;
+
+    // Get the total available memory from memory manager
+    long totalMapJoinMemory = desc.getMemoryNeeded();
+    LOG.info("Memory manager allocates " + totalMapJoinMemory + " bytes for the loading hashtable.");
+    if (totalMapJoinMemory <= 0) {
+      totalMapJoinMemory = HiveConf.getLongVar(
+              hconf, HiveConf.ConfVars.HIVECONVERTJOINNOCONDITIONALTASKTHRESHOLD);
+    }
+
+    long processMaxMemory = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getMax();
+    if (totalMapJoinMemory > processMaxMemory) {
+      float hashtableMemoryUsage = HiveConf.getFloatVar(
+              hconf, HiveConf.ConfVars.HIVEHASHTABLEFOLLOWBYGBYMAXMEMORYUSAGE);
+      LOG.warn("totalMapJoinMemory value of " + totalMapJoinMemory +
+              " is greater than the max memory size of " + processMaxMemory);
+      // Don't want to attempt to grab more memory than we have available .. percentage is a bit arbitrary
+      totalMapJoinMemory = (long) (processMaxMemory * hashtableMemoryUsage);
+    }
+
+    // Only applicable to n-way Hybrid Grace Hash Join
+    HybridHashTableConf nwayConf = null;
+    long totalSize = 0;
+    int biggest = 0;                                // position of the biggest small table
+    Map<Integer, Long> tableMemorySizes = null;
+    if (useHybridGraceHashJoin && mapJoinTables.length > 2) {
+      // Create a Conf for n-way HybridHashTableContainers
+      nwayConf = new HybridHashTableConf();
+      LOG.info("N-way join: " + (mapJoinTables.length - 1) + " small tables.");
+
+      // Find the biggest small table; also calculate total data size of all small tables
+      long maxSize = Long.MIN_VALUE; // the size of the biggest small table
+      for (int pos = 0; pos < mapJoinTables.length; pos++) {
+        if (pos == desc.getPosBigTable()) {
+          continue;
+        }
+        long smallTableSize = desc.getParentDataSizes().get(pos);
+        totalSize += smallTableSize;
+        if (maxSize < smallTableSize) {
+          maxSize = smallTableSize;
+          biggest = pos;
+        }
+      }
+
+      tableMemorySizes = divideHybridHashTableMemory(mapJoinTables, desc,
+              totalSize, totalMapJoinMemory);
+      // Using biggest small table, calculate number of partitions to create for each small table
+      long memory = tableMemorySizes.get(biggest);
+      int numPartitions = 0;
+      try {
+        numPartitions = HybridHashTableContainer.calcNumPartitions(memory, maxSize,
+                HiveConf.getIntVar(hconf, HiveConf.ConfVars.HIVEHYBRIDGRACEHASHJOINMINNUMPARTITIONS),
+                HiveConf.getIntVar(hconf, HiveConf.ConfVars.HIVEHYBRIDGRACEHASHJOINMINWBSIZE));
+      } catch (IOException e) {
+        throw new HiveException(e);
+      }
+      nwayConf.setNumberOfPartitions(numPartitions);
+    }
+    MemoryMonitorInfo memoryMonitorInfo = desc.getMemoryMonitorInfo();
+    boolean doMemCheck = false;
+    long effectiveThreshold = 0;
+    if (memoryMonitorInfo != null) {
+      effectiveThreshold = memoryMonitorInfo.getEffectiveThreshold(desc.getMaxMemoryAvailable());
+
+      // hash table loading happens in server side, LlapDecider could kick out some fragments to run outside of LLAP.
+      // Flip the flag at runtime in case if we are running outside of LLAP
+      if (!LlapDaemonInfo.INSTANCE.isLlap()) {
+        memoryMonitorInfo.setLlap(false);
+      }
+      if (memoryMonitorInfo.doMemoryMonitoring()) {
+        doMemCheck = true;
+        if (LOG.isInfoEnabled()) {
+          LOG.info("Memory monitoring for hash table loader enabled. {}", memoryMonitorInfo);
+        }
+      }
+    }
+
+    if (!doMemCheck) {
+      if (LOG.isInfoEnabled()) {
+        LOG.info("Not doing hash table memory monitoring. {}", memoryMonitorInfo);
+      }
+    }
+    for (int pos = 0; pos < mapJoinTables.length; pos++) {
+      if (pos == desc.getPosBigTable()) {
+        continue;
+      }
+
+      long numEntries = 0;
+      String inputName = parentToInput.get(pos);
+      LogicalInput input = tezContext.getInput(inputName);
+
+      try {
+        input.start();
+        tezContext.getTezProcessorContext().waitForAnyInputReady(
+                Collections.<Input> singletonList(input));
+      } catch (Exception e) {
+        throw new HiveException(e);
+      }
+
+      try {
+        KeyValueReader kvReader = (KeyValueReader) input.getReader();
+        MapJoinObjectSerDeContext keyCtx = mapJoinTableSerdes[pos].getKeyContext(),
+                valCtx = mapJoinTableSerdes[pos].getValueContext();
+        if (useOptimizedTables) {
+          ObjectInspector keyOi = keyCtx.getSerDe().getObjectInspector();
+          if (!MapJoinBytesTableContainer.isSupportedKey(keyOi)) {
+            if (isFirstKey) {
+              useOptimizedTables = false;
+              LOG.info(describeOi("Not using optimized hash table. " +
+                      "Only a subset of mapjoin keys is supported. Unsupported key: ", keyOi));
+            } else {
+              throw new HiveException(describeOi(
+                      "Only a subset of mapjoin keys is supported. Unsupported key: ", keyOi));
+            }
+          }
+        }
+        isFirstKey = false;
+        Long keyCountObj = parentKeyCounts.get(pos);
+        long keyCount = (keyCountObj == null) ? -1 : keyCountObj.longValue();
+
+        long memory = 0;
+        if (useHybridGraceHashJoin) {
+          if (mapJoinTables.length > 2) {
+            memory = tableMemorySizes.get(pos);
+          } else {  // binary join
+            memory = totalMapJoinMemory;
+          }
+        }
+
+        MapJoinTableContainer tableContainer;
+        if (useOptimizedTables) {
+          if (!useHybridGraceHashJoin || isCrossProduct) {
+            tableContainer = new MapJoinBytesTableContainer(hconf, valCtx, keyCount, 0);
+          } else {
+            tableContainer = new HybridHashTableContainer(hconf, keyCount, memory,
+                    desc.getParentDataSizes().get(pos), nwayConf);
+          }
+        } else {
+          tableContainer = new HashMapWrapper(hconf, keyCount);
+        }
+
+        LOG.info("Loading hash table for input: {} cacheKey: {} tableContainer: {} smallTablePos: {}", inputName,
+                cacheKey, tableContainer.getClass().getSimpleName(), pos);
+
+        tableContainer.setSerde(keyCtx, valCtx);
+
+        /*
+         * GHive: initializing dataflow for broadcast mapjoin small table.
+         */
+        ObjectInspector keyOI = keyCtx.getStandardOI();
+        ObjectInspector valueOI = valCtx.getStandardOI();
+        BroadCastGPUInput gpuInput = new BroadCastGPUInput(inputName);
+        InfoCollector.allInputs.add(gpuInput);
+        gpuInput.broadCastInit(keyOI, valueOI);
+
+
+        while (kvReader.next()) {
+          if (InfoCollector.isGPU) {
+            Object deserKey = keyCtx.getSerDe().deserialize((Writable) kvReader.getCurrentKey());
+            Object deserValue = valCtx.getSerDe().deserialize((Writable) kvReader.getCurrentValue());
+
+            assert deserKey != null;
+            //ObjectInspector keyOI = keyCtx.getStandardOI();
+
+            if (!(deserKey instanceof ArrayList)) {
+              LOG.info("GHive Error: value class " + deserValue.getClass());
+            }
+            ArrayList<Object> keyArr = null;
+            ArrayList<Object> valueArr = null;
+            if (deserKey instanceof ArrayList) {
+              keyArr = (ArrayList<Object>) deserKey;
+            }
+            if (deserValue instanceof LazyBinaryStruct) {
+              valueArr = ((LazyBinaryStruct) deserValue).getFieldsAsList();
+            }
+            gpuInput.feedRow(keyArr, valueArr);
+          }
+
+
+
+//          tableContainer.putRow((Writable) kvReader.getCurrentKey(), (Writable) kvReader.getCurrentValue());
+          numEntries++;
+          if (doMemCheck && (numEntries % memoryMonitorInfo.getMemoryCheckInterval() == 0)) {
+            final long estMemUsage = tableContainer.getEstimatedMemorySize();
+            if (estMemUsage > effectiveThreshold) {
+              String msg = "Hash table loading exceeded memory limits for input: " + inputName +
+                      " numEntries: " + numEntries + " estimatedMemoryUsage: " + estMemUsage +
+                      " effectiveThreshold: " + effectiveThreshold + " memoryMonitorInfo: " + memoryMonitorInfo;
+              LOG.error(msg);
+              throw new MapJoinMemoryExhaustionError(msg);
+            } else {
+              if (LOG.isInfoEnabled()) {
+                LOG.info("Checking hash table loader memory usage for input: {} numEntries: {} " +
+                                "estimatedMemoryUsage: {} effectiveThreshold: {}", inputName, numEntries, estMemUsage,
+                        effectiveThreshold);
+              }
+            }
+          }
+        }
+        tableContainer.seal();
+        mapJoinTables[pos] = tableContainer;
+        if (doMemCheck) {
+          LOG.info("Finished loading hash table for input: {} cacheKey: {} numEntries: {} estimatedMemoryUsage: {}",
+                  inputName, cacheKey, numEntries, tableContainer.getEstimatedMemorySize());
+        } else {
+          LOG.info("Finished loading hash table for input: {} cacheKey: {} numEntries: {}", inputName, cacheKey,
+                  numEntries);
+        }
+      } catch (Exception e) {
+        throw new HiveException(e);
+      }
+    }
+  }
+
 
   private static Map<Integer, Long> divideHybridHashTableMemory(
       MapJoinTableContainer[] mapJoinTables, MapJoinDesc desc,

@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hive.ql.exec.CommonMergeJoinOperator;
@@ -360,7 +361,17 @@ public class ReduceRecordSource implements RecordSource {
       row.add(deserializeValue(valueWritable, tag));
 
       try {
-        reducer.process(row, tag);
+        /*
+         * GHive: feed a single row to collector.
+         */
+        if (InfoCollector.isGPU) {
+          InfoCollector.recordProcessorInput[tag].feedRow(row, rowObjectInspector);
+          if (!InfoCollector.recordProcessorInput[tag].isSetKeyCnt()) {
+            InfoCollector.recordProcessorInput[tag].setKeyCnt(firstValueColumnOffset);
+          }
+        } else {
+          reducer.process(row, tag);
+        }
       } catch (Exception e) {
         String rowString = null;
         try {
@@ -449,7 +460,20 @@ public class ReduceRecordSource implements RecordSource {
           if (handleGroupKey) {
             reducer.setNextVectorBatchGroupStatus(/* isLastGroupBatch */ false);
           }
-          reducer.process(batch, tag);
+
+
+          /*
+           * GHive: feed a vector to collector
+           */
+          if (InfoCollector.isGPU) {
+            InfoCollector.recordProcessorInput[tag].feedBatch(batch);
+            if (!InfoCollector.recordProcessorInput[tag].isSetKeyCnt()) {
+              InfoCollector.recordProcessorInput[tag].setKeyCnt(firstValueColumnOffset);
+            }
+
+          } else {
+            reducer.process(batch, tag);
+          }
 
           // Reset just the value columns and value buffer.
           for (int i = firstValueColumnOffset; i < batch.numCols; i++) {
@@ -477,7 +501,18 @@ public class ReduceRecordSource implements RecordSource {
         if (handleGroupKey) {
           reducer.setNextVectorBatchGroupStatus(/* isLastGroupBatch */ true);
         }
-        reducer.process(batch, tag);
+
+        /*
+         * GHive: feed a vector to collector
+         */
+        if (InfoCollector.isGPU) {
+          InfoCollector.recordProcessorInput[tag].feedBatch(batch);
+          if (!InfoCollector.recordProcessorInput[tag].isSetKeyCnt()) {
+            InfoCollector.recordProcessorInput[tag].setKeyCnt(firstValueColumnOffset);
+          }
+        } else {
+          reducer.process(batch, tag);
+        }
       }
       batch.reset();
     } catch (Exception e) {
@@ -513,6 +548,10 @@ public class ReduceRecordSource implements RecordSource {
 
   public ObjectInspector getObjectInspector() {
     return rowObjectInspector;
+  }
+
+  public Operator<?> getReducer() {
+    return this.reducer;
   }
 
   public void setFlushLastRecord(boolean flushLastRecord) {

@@ -113,6 +113,10 @@ public class VectorFileSinkOperator extends FileSinkOperator
     }
   }
 
+  public void processSingleRow(Object row, int tag) throws HiveException {
+    super.process(row, 0);
+  }
+
   @Override
   public VectorDesc getVectorDesc() {
     return vectorDesc;

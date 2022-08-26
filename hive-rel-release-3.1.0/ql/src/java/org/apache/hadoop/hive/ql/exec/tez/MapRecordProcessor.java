@@ -30,25 +30,22 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 
 import org.apache.hadoop.hive.llap.LlapUtil;
+import org.apache.hadoop.hive.ql.exec.*;
+import org.apache.hadoop.hive.ql.exec.ObjectCache;
+import org.apache.hadoop.hive.ql.exec.ghive.GTable;
+import org.apache.hadoop.hive.ql.exec.ghive.GPUResult;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
+import org.apache.hadoop.hive.ql.exec.ghive.JNIInterface;
+import org.apache.hadoop.hive.ql.exec.vector.VectorFileSinkOperator;
+import org.apache.hadoop.hive.ql.exec.vector.reducesink.VectorReduceSinkCommonOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.ql.exec.AbstractMapOperator;
 import org.apache.hadoop.hive.llap.io.api.LlapProxy;
 import org.apache.hadoop.hive.llap.tez.Converters;
 import org.apache.hadoop.hive.ql.CompilationOpContext;
 import org.apache.hadoop.hive.llap.LlapOutputFormat;
-import org.apache.hadoop.hive.ql.exec.DummyStoreOperator;
-import org.apache.hadoop.hive.ql.exec.HashTableDummyOperator;
-import org.apache.hadoop.hive.ql.exec.MapOperator;
-import org.apache.hadoop.hive.ql.exec.MapredContext;
-import org.apache.hadoop.hive.ql.exec.ObjectCache;
-import org.apache.hadoop.hive.ql.exec.ObjectCacheFactory;
-import org.apache.hadoop.hive.ql.exec.Operator;
-import org.apache.hadoop.hive.ql.exec.OperatorUtils;
-import org.apache.hadoop.hive.ql.exec.TezDummyStoreOperator;
-import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.exec.mr.ExecMapper.ReportStats;
 import org.apache.hadoop.hive.ql.exec.mr.ExecMapperContext;
 import org.apache.hadoop.hive.ql.exec.tez.DynamicValueRegistryTez.RegistryConfTez;
@@ -129,12 +126,13 @@ public class MapRecordProcessor extends RecordProcessor {
 
 
     // create map and fetch operators
-    mapWork = (MapWork) cache.retrieve(key, new Callable<Object>() {
-        @Override
-        public Object call() {
-          return Utilities.getMapWork(jconf);
-        }
-      });
+//    mapWork = (MapWork) cache.retrieve(key, new Callable<Object>() {
+//        @Override
+//        public Object call() {
+//          return Utilities.getMapWork(jconf);
+//        }
+//      });
+    mapWork = Utilities.getMapWork(jconf);
     // TODO HIVE-14042. Cleanup may be required if exiting early.
     Utilities.setMapWork(jconf, mapWork);
 
@@ -187,6 +185,12 @@ public class MapRecordProcessor extends RecordProcessor {
       ((TezKVOutputCollector) outMap.get(outputEntry.getKey())).initialize();
     }
     checkAbortCondition();
+
+    if (InfoCollector.isGPU) {
+      InfoCollector.recordProcessorInput = new GTable[1];
+      InfoCollector.recordProcessorInput[0] = new GTable(mapWork.getName());
+      InfoCollector.allInputs.add(InfoCollector.recordProcessorInput[0]);
+    }
 
     try {
 
@@ -415,11 +419,82 @@ public class MapRecordProcessor extends RecordProcessor {
 
   @Override
   void run() throws Exception {
-    startAbortChecks();
-    while (sources[position].pushRecord()) {
-      addRowAndMaybeCheckAbort();
+    VectorMapOperator mapRoot  = (VectorMapOperator)sources[position].getMapper();
+
+
+    if(InfoCollector.isGPU) {
+      while (sources[position].pushRecord()) ;
+
+      l4j.info("Profiling: Tez 'Shuffle' on Map stage ending at time " + System.currentTimeMillis() + " ms");
+      System.out.println("Profiling: Tez 'Shuffle' on Map stage ending at time "
+              + System.currentTimeMillis() + " ms");
+      l4j.info("Profiling: Tez 'Processor' on Map stage starting at time "
+              + System.currentTimeMillis() + " ms");
+      System.out.println("Profiling: Tez 'Processor' on Map stage starting at time "
+              + System.currentTimeMillis() + " ms");
+
+      //Get the process root operator.
+      Operator<?> mapper = sources[position].getMapper();
+
+      //Traverse the operator tree, get the maintainValue list for each join operator.
+      traverse(mapper);
+
+      // Ready the collected data for JNI transformation.
+      JNIInterface.readyInputs();
+
+
+      // GPU Processing
+      GPUResult result = null;
+      if (InfoCollector.hasData) {
+//        for (GPUInput table:InfoCollector.allInputs) {
+//          l4j.info(table.toString(20)+"\n");
+//        }
+        l4j.info("GHive: before JNIInterface.process().");
+        result = JNIInterface.process();
+        l4j.info("GHive: after JNIInterface.process().");
+//        l4j.info(InfoCollector.getVertexName()+"GPU result: " + result.toString() + "\n"
+//                + "=======================================");
+      }
+      if (result != null) {
+        // Traverse the operator tree and get the sink operator.
+        // sink operator is always at the bottom of the tree.
+        Operator<?> sinkOp = mapper;
+        while (!sinkOp.getChildOperators().isEmpty()) {
+          sinkOp = sinkOp.getChildOperators().get(0);
+        }
+        // Integers in GPU are processed as long.
+        // Get the type information to do transformation.
+        ObjectInspector inspector = sinkOp.getInputObjInspectors()[0];
+        result.setInspectorType(inspector.toString());
+
+        // feed the computation result to the sink operator.
+        if (sinkOp instanceof VectorReduceSinkCommonOperator) {
+          sinkOp.process(result.generateBatch(), 0);
+        } else if (sinkOp instanceof VectorFileSinkOperator) {
+          while (result.hasNext()) {
+            Object obj = result.next();
+            ((VectorFileSinkOperator) sinkOp).processSingleRow(obj, 0);
+          }
+        } else if (sinkOp instanceof ReduceSinkOperator || sinkOp instanceof FileSinkOperator) {
+          while (result.hasNext()) {
+            Object obj = result.next();
+            sinkOp.process(obj, 0);
+          }
+        }
+      } else {
+        l4j.info("GHive: no result in this " + InfoCollector.getVertexName());
+      }
+    }
+    else{
+      l4j.info("Profiling: Tez 'Processor' on Map stage starting at time "
+              + System.currentTimeMillis() + " ms");
+      while (sources[position].pushRecord()) {
+        addRowAndMaybeCheckAbort();
+      }
     }
   }
+
+
 
   @Override
   public void abort() {

@@ -20,9 +20,11 @@ package org.apache.hadoop.hive.ql.exec.tez.monitoring;
 
 import static org.apache.tez.dag.api.client.DAGStatus.State.RUNNING;
 
-import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.io.StringWriter;
+import java.io.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.net.Socket;
+import java.net.UnknownHostException;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -137,6 +139,43 @@ public class TezJobMonitor {
       Utilities.isPerfOrAboveLogging(hiveConf);
   }
 
+  public void SendStart () {
+    try {
+      Socket socket = new Socket("127.0.0.1", 12315);
+
+      OutputStream os = socket.getOutputStream();
+      PrintWriter pw = new PrintWriter(os);
+      pw.write("start");
+      pw.flush();
+      socket.shutdownOutput();
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  String SendEnd() {
+    String content = "";
+    try {
+      Socket socket = new Socket("127.0.0.1", 12315);
+
+      OutputStream os = socket.getOutputStream();
+      PrintWriter pw = new PrintWriter(os);
+      pw.write("end..");
+      pw.flush();
+      socket.shutdownOutput();
+
+      InputStream is = socket.getInputStream();
+      BufferedReader br = new BufferedReader(new InputStreamReader(is));
+      String info;
+      while ((info = br.readLine()) != null) {
+        content += info;
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+    return content;
+  }
+
   public int monitorExecution() {
     boolean done = false;
     boolean success = false;
@@ -200,12 +239,14 @@ public class TezJobMonitor {
             case INITING:
               console.printInfo("Status: Initializing");
               this.executionStartTime = System.currentTimeMillis();
+              //SendStart();
               break;
             case RUNNING:
               if (!running) {
                 perfLogger.PerfLogEnd(CLASS_NAME, PerfLogger.TEZ_SUBMIT_TO_RUNNING);
                 console.printInfo("Status: Running (" + dagClient.getExecutionContext() + ")\n");
                 this.executionStartTime = System.currentTimeMillis();
+                //SendStart();
                 running = true;
               }
               updateFunction.update(status, vertexProgressMap);
@@ -213,6 +254,7 @@ public class TezJobMonitor {
             case SUCCEEDED:
               if (!running) {
                 this.executionStartTime = monitorStartTime;
+                //SendStart();
               }
               updateFunction.update(status, vertexProgressMap);
               success = true;
@@ -222,6 +264,7 @@ public class TezJobMonitor {
             case KILLED:
               if (!running) {
                 this.executionStartTime = monitorStartTime;
+                //SendStart();
               }
               updateFunction.update(status, vertexProgressMap);
               console.printInfo("Status: Killed");
@@ -233,6 +276,7 @@ public class TezJobMonitor {
             case ERROR:
               if (!running) {
                 this.executionStartTime = monitorStartTime;
+                //SendStart();
               }
               updateFunction.update(status, vertexProgressMap);
               console.printError("Status: Failed");
@@ -276,6 +320,14 @@ public class TezJobMonitor {
         }
       } finally {
         if (done) {
+          System.out.println("total-time: "+(System.currentTimeMillis()-executionStartTime));
+		  Pattern pattern = Pattern.compile(".*(application_[0-9]+_[0-9]+).*");
+		  Matcher matcher = pattern.matcher(dagClient.getExecutionContext());
+		  if (matcher.find()) {
+          	System.out.println("applicationId: " + matcher.group(1));
+		  }
+          //String backString = SendEnd();
+          //System.out.println(backString);
           if (wmContext != null && done) {
             wmContext.setQueryCompleted(true);
           }

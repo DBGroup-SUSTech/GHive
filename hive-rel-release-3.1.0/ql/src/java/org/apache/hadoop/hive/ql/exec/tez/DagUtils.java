@@ -45,8 +45,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipOutputStream;
 
+import com.google.common.reflect.TypeToken;
+import com.google.gson.Gson;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.tez.mapreduce.common.MRInputSplitDistributor;
 import org.apache.tez.mapreduce.hadoop.InputSplitInfo;
 import org.apache.tez.mapreduce.protos.MRRuntimeProtos;
@@ -275,6 +278,25 @@ public class DagUtils {
       TezEdgeProperty edgeProp, BaseWork work, TezWork tezWork)
     throws IOException {
 
+    String ignoreJsonString = "";
+    try {
+      FileSystem fs = FileSystem.get(vConf);
+      StringBuilder builder=new StringBuilder();
+      byte[] buffer=new byte[4096];
+      int bytesRead;
+
+      FSDataInputStream in = fs.open(new Path("/tmp/plan/ignore_vertices.txt"));
+      while ((bytesRead = in.read(buffer)) > 0)
+        builder.append(new String(buffer, 0, bytesRead));
+      in.close();
+      ignoreJsonString = builder.toString();
+    } catch (IOException ex) {
+      ex.printStackTrace();
+    }
+    Map<String, Boolean> ignoreVerticesMap = new Gson().fromJson(ignoreJsonString,
+            new TypeToken<HashMap<String, Boolean>>(){}.getType());
+
+
     Class mergeInputClass;
 
     LOG.info("Creating Edge between " + group.getGroupName() + " and " + w.getName());
@@ -317,12 +339,21 @@ public class DagUtils {
       // fall through
 
     default:
-      mergeInputClass = TezMergedLogicalInput.class;
+      if (ignoreVerticesMap.containsKey(w.getName()) && !ignoreVerticesMap.get(w.getName())) {
+        mergeInputClass = TezMergedLogicalInput.class;
+      } else {
+        mergeInputClass = ConcatenatedMergedKeyValueInput.class;
+      }
       break;
     }
 
-    return GroupInputEdge.create(group, w, createEdgeProperty(w, edgeProp, vConf, work, tezWork),
-        InputDescriptor.create(mergeInputClass.getName()));
+    if (ignoreVerticesMap.containsKey(w.getName()) && !ignoreVerticesMap.get(w.getName())) {
+      return GroupInputEdge.create(group, w, createEdgePropertyOrdered(w, edgeProp, vConf, work, tezWork),
+              InputDescriptor.create(mergeInputClass.getName()));
+    } else {
+      return GroupInputEdge.create(group, w, createEdgeProperty(w, edgeProp, vConf, work, tezWork),
+              InputDescriptor.create(mergeInputClass.getName()));
+    }
   }
 
   /**
@@ -337,6 +368,26 @@ public class DagUtils {
   public Edge createEdge(JobConf vConf, Vertex v, Vertex w, TezEdgeProperty edgeProp,
       BaseWork work, TezWork tezWork)
     throws IOException {
+
+
+    String ignoreJsonString = "";
+    try {
+      FileSystem fs = FileSystem.get(vConf);
+      StringBuilder builder=new StringBuilder();
+      byte[] buffer=new byte[4096];
+      int bytesRead;
+
+      FSDataInputStream in = fs.open(new Path("/tmp/plan/ignore_vertices.txt"));
+      while ((bytesRead = in.read(buffer)) > 0)
+        builder.append(new String(buffer, 0, bytesRead));
+      in.close();
+      ignoreJsonString = builder.toString();
+    } catch (IOException ex) {
+      ex.printStackTrace();
+    }
+
+    Map<String, Boolean> ignoreVerticesMap = new Gson().fromJson(ignoreJsonString,
+            new TypeToken<HashMap<String, Boolean>>(){}.getType());
 
     switch(edgeProp.getEdgeType()) {
     case CUSTOM_EDGE: {
@@ -369,7 +420,100 @@ public class DagUtils {
       // nothing
     }
 
-    return Edge.create(v, w, createEdgeProperty(w, edgeProp, vConf, work, tezWork));
+    if (ignoreVerticesMap.containsKey(w.getName()) /*|| ignoreVerticesMap.containsKey(v.getName())*/) {
+      return Edge.create(v, w, createEdgePropertyOrdered(w, edgeProp, vConf, work, tezWork));
+    } else {
+      return Edge.create(v, w, createEdgeProperty(w, edgeProp, vConf, work, tezWork));
+    }
+  }
+
+  /*
+   * Helper function to create an edge property from an edge type.
+   */
+  private EdgeProperty createEdgePropertyOrdered(Vertex w, TezEdgeProperty edgeProp,
+                                          Configuration conf, BaseWork work, TezWork tezWork)
+          throws IOException {
+    MRHelpers.translateMRConfToTez(conf);
+    String keyClass = conf.get(TezRuntimeConfiguration.TEZ_RUNTIME_KEY_CLASS);
+    String valClass = conf.get(TezRuntimeConfiguration.TEZ_RUNTIME_VALUE_CLASS);
+    String partitionerClassName = conf.get("mapred.partitioner.class");
+    Map<String, String> partitionerConf;
+
+    EdgeType edgeType = edgeProp.getEdgeType();
+    switch (edgeType) {
+      case BROADCAST_EDGE:
+        UnorderedKVEdgeConfig et1Conf = UnorderedKVEdgeConfig
+                .newBuilder(keyClass, valClass)
+                .setFromConfiguration(conf)
+                .setKeySerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .build();
+        return et1Conf.createDefaultBroadcastEdgeProperty();
+      case CUSTOM_EDGE:
+        assert partitionerClassName != null;
+        partitionerConf = createPartitionerConf(partitionerClassName, conf);
+        UnorderedPartitionedKVEdgeConfig et2Conf = UnorderedPartitionedKVEdgeConfig
+                .newBuilder(keyClass, valClass, MRPartitioner.class.getName(), partitionerConf)
+                .setFromConfiguration(conf)
+                .setKeySerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .build();
+        EdgeManagerPluginDescriptor edgeDesc =
+                EdgeManagerPluginDescriptor.create(CustomPartitionEdge.class.getName());
+        CustomEdgeConfiguration edgeConf =
+                new CustomEdgeConfiguration(edgeProp.getNumBuckets(), null);
+        DataOutputBuffer dob = new DataOutputBuffer();
+        edgeConf.write(dob);
+        byte[] userPayload = dob.getData();
+        edgeDesc.setUserPayload(UserPayload.create(ByteBuffer.wrap(userPayload)));
+        return et2Conf.createDefaultCustomEdgeProperty(edgeDesc);
+      case CUSTOM_SIMPLE_EDGE:
+        assert partitionerClassName != null;
+        partitionerConf = createPartitionerConf(partitionerClassName, conf);
+        UnorderedPartitionedKVEdgeConfig et3Conf = UnorderedPartitionedKVEdgeConfig
+                .newBuilder(keyClass, valClass, MRPartitioner.class.getName(), partitionerConf)
+                .setFromConfiguration(conf)
+                .setKeySerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .build();
+        return et3Conf.createDefaultEdgeProperty();
+      case ONE_TO_ONE_EDGE:
+        UnorderedKVEdgeConfig et4Conf = UnorderedKVEdgeConfig
+                .newBuilder(keyClass, valClass)
+                .setFromConfiguration(conf)
+                .setKeySerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
+                .build();
+        return et4Conf.createDefaultOneToOneEdgeProperty();
+      case XPROD_EDGE:
+        EdgeManagerPluginDescriptor edgeManagerDescriptor =
+                EdgeManagerPluginDescriptor.create(CartesianProductEdgeManager.class.getName());
+        List<String> crossProductSources = new ArrayList<>();
+        for (BaseWork parentWork : tezWork.getParents(work)) {
+          if (EdgeType.XPROD_EDGE == tezWork.getEdgeType(parentWork, work)) {
+            crossProductSources.add(parentWork.getName());
+          }
+        }
+        CartesianProductConfig cpConfig = new CartesianProductConfig(crossProductSources);
+        edgeManagerDescriptor.setUserPayload(cpConfig.toUserPayload(new TezConfiguration(conf)));
+        UnorderedPartitionedKVEdgeConfig cpEdgeConf =
+                UnorderedPartitionedKVEdgeConfig.newBuilder(keyClass, valClass,
+                        ValueHashPartitioner.class.getName()).build();
+        return cpEdgeConf.createDefaultCustomEdgeProperty(edgeManagerDescriptor);
+      case SIMPLE_EDGE:
+        // fallthrough
+      default:
+        assert partitionerClassName != null;
+        partitionerConf = createPartitionerConf(partitionerClassName, conf);
+        OrderedPartitionedKVEdgeConfig et5Conf = OrderedPartitionedKVEdgeConfig
+            .newBuilder(keyClass, valClass, MRPartitioner.class.getName(), partitionerConf)
+            .setFromConfiguration(conf)
+            .setKeySerializationClass(TezBytesWritableSerialization.class.getName(),
+                TezBytesComparator.class.getName(), null)
+            .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
+            .build();
+        return et5Conf.createDefaultEdgeProperty();
+    }
   }
 
   /*
@@ -450,13 +594,20 @@ public class DagUtils {
     default:
       assert partitionerClassName != null;
       partitionerConf = createPartitionerConf(partitionerClassName, conf);
-      OrderedPartitionedKVEdgeConfig et5Conf = OrderedPartitionedKVEdgeConfig
-          .newBuilder(keyClass, valClass, MRPartitioner.class.getName(), partitionerConf)
-          .setFromConfiguration(conf)
-          .setKeySerializationClass(TezBytesWritableSerialization.class.getName(),
-              TezBytesComparator.class.getName(), null)
-          .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
-          .build();
+//      OrderedPartitionedKVEdgeConfig et5Conf = OrderedPartitionedKVEdgeConfig
+//          .newBuilder(keyClass, valClass, MRPartitioner.class.getName(), partitionerConf)
+//          .setFromConfiguration(conf)
+//          .setKeySerializationClass(TezBytesWritableSerialization.class.getName(),
+//              TezBytesComparator.class.getName(), null)
+//          .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
+//          .build();
+      UnorderedPartitionedKVEdgeConfig et5Conf = UnorderedPartitionedKVEdgeConfig
+              .newBuilder(keyClass, valClass, MRPartitioner.class.getName(), partitionerConf)
+              .setFromConfiguration(conf)
+              .setKeySerializationClass(TezBytesWritableSerialization.class.getName(), null)
+              .setValueSerializationClass(TezBytesWritableSerialization.class.getName(), null)
+              .build();
+
       return et5Conf.createDefaultEdgeProperty();
     }
   }

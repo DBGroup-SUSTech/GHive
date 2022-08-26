@@ -1111,8 +1111,15 @@ public class VectorGroupByOperator extends Operator<GroupByDesc>
     throw new HiveException("Unexpected startGroup");
   }
 
+  boolean hasPrintStart = false;
   @Override
   public void process(Object row, int tag) throws HiveException {
+    processStartTime = System.nanoTime();
+    if (!hasPrintStart) {
+      startTime = System.currentTimeMillis();
+      LOG.info("Operator [" + getOperatorId() + "] starts at: " + startTime);
+      hasPrintStart = true;
+    }
     VectorizedRowBatch batch = (VectorizedRowBatch) row;
     if (batch.size > 0) {
       processingMode.processBatch(batch);
@@ -1176,6 +1183,8 @@ public class VectorGroupByOperator extends Operator<GroupByDesc>
 
   @Override
   public void closeOp(boolean aborted) throws HiveException {
+    endTime = System.currentTimeMillis();
+    LOG.info("Operator [" + getOperatorId() + "] ends at: " + endTime);
     processingMode.close(aborted);
     if (!aborted && outputBatch.size > 0) {
       flushOutput();

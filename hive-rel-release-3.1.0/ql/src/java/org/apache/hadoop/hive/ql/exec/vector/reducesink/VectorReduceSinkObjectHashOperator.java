@@ -24,6 +24,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.ql.CompilationOpContext;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorExtractRow;
 import org.apache.hadoop.hive.ql.exec.vector.VectorSerializeRow;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizationContext;
@@ -145,8 +146,17 @@ public class VectorReduceSinkObjectHashOperator extends VectorReduceSinkCommonOp
       keyOutput = new Output();
       keyBinarySortableSerializeWrite.set(keyOutput);
       keyVectorSerializeRow =
-          new VectorSerializeRow<BinarySortableSerializeWrite>(
-              keyBinarySortableSerializeWrite);
+              new VectorSerializeRow<BinarySortableSerializeWrite>(
+                      keyBinarySortableSerializeWrite);
+
+      if (InfoCollector.isGPU) {
+        //GHive: first (keyNum) columns are keys.
+        if (InfoCollector.getVertexName().matches("Reducer [0-9]*")) {
+          for (int i = 0; i < reduceSinkKeyColumnMap.length; i++) {
+            reduceSinkKeyColumnMap[i] = i;
+          }
+        }
+      }
       keyVectorSerializeRow.init(reduceSinkKeyTypeInfos, reduceSinkKeyColumnMap);
     }
 

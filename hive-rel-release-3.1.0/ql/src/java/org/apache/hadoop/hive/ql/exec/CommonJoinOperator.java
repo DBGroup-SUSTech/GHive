@@ -54,6 +54,11 @@ public abstract class CommonJoinOperator<T extends JoinDesc> extends
   protected static final Logger LOG = LoggerFactory.getLogger(CommonJoinOperator.class
       .getName());
 
+  /**
+   * GHive maintain the join columns.
+   */
+  private Map<Byte, List<String>> maintainValues;
+
   protected transient int numAliases; // number of aliases
   /**
    * The expressions for join inputs.
@@ -253,8 +258,18 @@ public abstract class CommonJoinOperator<T extends JoinDesc> extends
     nullsafes = conf.getNullSafes();
     noOuterJoin = conf.isNoOuterJoin();
 
-    totalSz = JoinUtil.populateJoinKeyValue(joinValues, conf.getExprs(),
-        order,NOTSKIPBIGTABLE, hconf);
+    //totalSz = JoinUtil.populateJoinKeyValue(joinValues, conf.getExprs(),
+    //    order,NOTSKIPBIGTABLE, hconf);
+
+    maintainValues = new HashMap<>();
+    totalSz = JoinUtil.populateAndMaintainJoinValue(joinValues, conf.getExprs(),
+            order,NOTSKIPBIGTABLE, hconf, maintainValues);
+    System.out.println("haotian-join: " + getOperatorName() + "_" + getOperatorId());
+    for (Map.Entry<Byte, List<String>> e: maintainValues.entrySet()) {
+      System.out.println("haotian-table: " + e.getKey());
+      System.out.println("haotian-joinCol: " + e.getValue());
+    }
+    System.out.println("haotian-join-totalSz: " + totalSz);
 
     //process join filters
     joinFilters = new List[tagLen];
@@ -998,5 +1013,9 @@ public abstract class CommonJoinOperator<T extends JoinDesc> extends
   @Override
   public boolean opAllowedAfterMapJoin() {
     return false;
+  }
+
+  public Map<Byte, List<String>> getMaintainValues() {
+    return maintainValues;
   }
 }

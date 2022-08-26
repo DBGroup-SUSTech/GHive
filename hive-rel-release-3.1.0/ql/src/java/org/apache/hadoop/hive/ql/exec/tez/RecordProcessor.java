@@ -16,20 +16,25 @@
  * limitations under the License.
  */
 package org.apache.hadoop.hive.ql.exec.tez;
+import java.io.IOException;
 import java.net.URLClassLoader;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
 
+import com.google.common.reflect.TypeToken;
+import com.google.gson.Gson;
+import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.ql.exec.*;
 import org.apache.hadoop.hive.ql.exec.ObjectCache;
-import org.apache.hadoop.hive.ql.exec.Utilities;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.tez.TezProcessor.TezKVOutputCollector;
 import org.apache.hadoop.hive.ql.log.PerfLogger;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.plan.BaseWork;
+import org.apache.hadoop.hive.ql.plan.MapJoinDesc;
 import org.apache.hadoop.hive.ql.session.SessionState;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputCollector;
@@ -64,6 +69,27 @@ public abstract class RecordProcessor extends InterruptibleProcessing {
   public RecordProcessor(JobConf jConf, ProcessorContext processorContext) {
     this.jconf = jConf;
     this.processorContext = processorContext;
+    InfoCollector.fresh(processorContext.getTaskVertexName());
+
+    String ignoreJsonString = "";
+    try {
+      FileSystem fs = FileSystem.get(jConf);
+      StringBuilder builder=new StringBuilder();
+      byte[] buffer=new byte[4096];
+      int bytesRead;
+
+      FSDataInputStream in = fs.open(new Path("/tmp/plan/ignore_vertices.txt"));
+      while ((bytesRead = in.read(buffer)) > 0)
+        builder.append(new String(buffer, 0, bytesRead));
+      in.close();
+      ignoreJsonString = builder.toString();
+    } catch (IOException ex) {
+      ex.printStackTrace();
+    }
+    Map<String, Boolean> ignoreVerticesMap = new Gson().fromJson(ignoreJsonString,
+            new TypeToken<HashMap<String, Boolean>>(){}.getType());
+    InfoCollector.isGPU = !ignoreVerticesMap.containsKey(processorContext.getTaskVertexName());
+
   }
 
   /**
@@ -139,4 +165,23 @@ public abstract class RecordProcessor extends InterruptibleProcessing {
       return null;
     }
   }
+
+  public static void traverse(Operator<?> operator) {
+    if (operator instanceof CommonJoinOperator) {
+      InfoCollector.maintainValuesMap.
+              put(operator.getOperatorId(), ((CommonJoinOperator) operator).getMaintainValues());
+    }
+    if (operator instanceof MapJoinOperator || operator instanceof CommonMergeJoinOperator) {
+
+      if (operator instanceof MapJoinOperator) {
+        InfoCollector.retainListMap.put("MAPJOIN_" + operator.getIdentifier(),
+                ((MapJoinDesc) operator.getConf()).getRetainList());
+      } else {
+        InfoCollector.retainListMap.put("MERGEJOIN_" + operator.getIdentifier(),
+                ((MapJoinDesc) operator.getConf()).getRetainList());
+      }
+    }
+    operator.getChildOperators().forEach(RecordProcessor::traverse);
+  }
+
 }

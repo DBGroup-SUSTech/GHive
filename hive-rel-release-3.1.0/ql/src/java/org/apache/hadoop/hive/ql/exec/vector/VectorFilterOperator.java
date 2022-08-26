@@ -108,6 +108,7 @@ public class VectorFilterOperator extends FilterOperator
 
   @Override
   public void process(Object row, int tag) throws HiveException {
+    processStartTime = System.nanoTime();
 
     VectorizedRowBatch vrg = (VectorizedRowBatch) row;
 

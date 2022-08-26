@@ -26,6 +26,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
 
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.tez.ReduceRecordSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,7 +108,7 @@ public class CommonMergeJoinOperator extends AbstractMapJoinOperator<CommonMerge
     super.initializeOp(hconf);
     firstFetchHappened = false;
     fetchInputAtClose = getFetchInputAtCloseList();
-
+    startTime = System.currentTimeMillis();
     int maxAlias = 0;
     for (byte pos = 0; pos < order.length; pos++) {
       if (pos > maxAlias) {
@@ -213,8 +214,16 @@ public class CommonMergeJoinOperator extends AbstractMapJoinOperator<CommonMerge
    * int) this processor has a push-pull model. First call to this method is a
    * push but the rest is pulled until we run out of records.
    */
+  boolean hasPrintStart = false;
   @Override
   public void process(Object row, int tag) throws HiveException {
+    processStartTime = System.nanoTime();
+    if (!hasPrintStart) {
+      startTime = System.currentTimeMillis();
+      LOG.info("Operator [" + getOperatorId() + "] starts at: " + startTime);
+      processStartTime = System.nanoTime();
+      hasPrintStart = true;
+    }
     posBigTable = (byte) conf.getBigTablePosition();
 
     byte alias = (byte) tag;
@@ -411,7 +420,10 @@ public class CommonMergeJoinOperator extends AbstractMapJoinOperator<CommonMerge
   
   @Override
   public void close(boolean abort) throws HiveException {
-    joinFinalLeftData(); // Do this WITHOUT checking for parents
+    endTime = System.currentTimeMillis();
+    LOG.info("Operator [" + getOperatorId() + "] ends at: " + endTime);
+    if (!InfoCollector.isGPU)
+      joinFinalLeftData(); // Do this WITHOUT checking for parents
     super.close(abort);
   }
 

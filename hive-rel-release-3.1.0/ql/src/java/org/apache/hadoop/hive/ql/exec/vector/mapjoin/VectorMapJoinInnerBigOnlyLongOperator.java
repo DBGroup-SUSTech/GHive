@@ -101,9 +101,16 @@ public class VectorMapJoinInnerBigOnlyLongOperator extends VectorMapJoinInnerBig
   // Process Single-Column Long Inner Big-Only Join on a vectorized row batch.
   //
 
+  boolean hasPrintStart = false;
   @Override
   public void process(Object row, int tag) throws HiveException {
-
+    processStartTime = System.nanoTime();
+     if (!hasPrintStart) {
+       startTime = System.currentTimeMillis();
+       LOG.info("Operator [" + getOperatorId() + "] starts at: " + startTime);
+       processStartTime = System.nanoTime();
+       hasPrintStart = true;
+     }
     try {
       VectorizedRowBatch batch = (VectorizedRowBatch) row;
 

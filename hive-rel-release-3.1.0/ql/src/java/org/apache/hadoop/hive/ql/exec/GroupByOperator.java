@@ -731,8 +731,16 @@ public class GroupByOperator extends Operator<GroupByDesc> implements IConfigure
     }
   }
 
+  boolean hasPrintStart = false;
   @Override
   public void process(Object row, int tag) throws HiveException {
+    processStartTime = System.nanoTime();
+    if (!hasPrintStart) {
+      startTime = System.currentTimeMillis();
+      LOG.info("Operator [" + getOperatorId() + "] starts at: " + startTime);
+      processStartTime = System.nanoTime();
+      hasPrintStart = true;
+    }
     firstRow = false;
     ObjectInspector rowInspector = inputObjInspectors[0];
     // Total number of input rows is needed for hash aggregation only
@@ -1093,6 +1101,8 @@ public class GroupByOperator extends Operator<GroupByDesc> implements IConfigure
    */
   @Override
   public void closeOp(boolean abort) throws HiveException {
+    endTime = System.currentTimeMillis();
+    LOG.info("Operator [" + getOperatorId() + "] ends at: " + endTime);
     if (!abort) {
       try {
         // If there is no grouping key and no row came to this operator

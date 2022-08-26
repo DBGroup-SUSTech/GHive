@@ -74,6 +74,7 @@ public class FilterOperator extends Operator<FilterDesc> implements
 
   @Override
   public void process(Object row, int tag) throws HiveException {
+    processStartTime = System.nanoTime();
     ObjectInspector rowInspector = inputObjInspectors[tag];
     if (conditionInspector == null) {
       conditionInspector = (PrimitiveObjectInspector) conditionEvaluator

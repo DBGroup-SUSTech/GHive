@@ -20,7 +20,11 @@ package org.apache.hadoop.hive.ql.exec.tez;
 
 import java.io.IOException;
 
+import org.apache.hadoop.hive.ql.exec.MapOperator;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.tez.tools.KeyValueInputMerger;
+import org.apache.hadoop.hive.ql.exec.vector.VectorMapOperator;
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hive.ql.exec.AbstractMapOperator;
@@ -53,6 +57,10 @@ public class MapRecordSource implements RecordSource {
       kvMerger.setIOCxt(execContext.getIoCxt());
     }
     this.reader = reader;
+  }
+
+  public AbstractMapOperator getMapper() {
+    return mapOp;
   }
 
   @Override
@@ -89,7 +97,20 @@ public class MapRecordSource implements RecordSource {
       } else {
         // Since there is no concept of a group, we don't invoke
         // startGroup/endGroup for a mapper
-        mapOp.process((Writable) value);
+        if (InfoCollector.isGPU) {
+          if(value != null){
+            if(mapOp instanceof VectorMapOperator){
+              VectorizedRowBatch batch = (VectorizedRowBatch) value;
+              InfoCollector.recordProcessorInput[0].feedBatch(batch);
+            }
+            else if(mapOp instanceof MapOperator){
+              throw new Exception("MapOperator not handled currently.");
+            }
+          }
+        }
+        else{
+          mapOp.process((Writable) value);
+        }
       }
     } catch (Throwable e) {
       if (e instanceof OutOfMemoryError) {

@@ -17,36 +17,25 @@
  */
 package org.apache.hadoop.hive.ql.exec.tez;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.text.SimpleDateFormat;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.TreeMap;
 import java.util.concurrent.Callable;
 
 import org.apache.hadoop.hive.llap.LlapUtil;
+import org.apache.hadoop.hive.ql.exec.*;
+import org.apache.hadoop.hive.ql.exec.ObjectCache;
+import org.apache.hadoop.hive.ql.exec.ghive.*;
+import org.apache.hadoop.hive.ql.exec.vector.VectorFileSinkOperator;
+import org.apache.hadoop.hive.ql.exec.vector.reducesink.VectorReduceSinkCommonOperator;
+import org.apache.hadoop.hive.ql.plan.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.ql.exec.DummyStoreOperator;
-import org.apache.hadoop.hive.ql.exec.HashTableDummyOperator;
-import org.apache.hadoop.hive.ql.exec.MapredContext;
-import org.apache.hadoop.hive.ql.exec.ObjectCache;
-import org.apache.hadoop.hive.ql.exec.ObjectCacheFactory;
-import org.apache.hadoop.hive.ql.exec.Operator;
-import org.apache.hadoop.hive.ql.exec.OperatorUtils;
-import org.apache.hadoop.hive.ql.exec.Utilities;
 import org.apache.hadoop.hive.ql.exec.mr.ExecMapper.ReportStats;
 import org.apache.hadoop.hive.ql.exec.tez.DynamicValueRegistryTez.RegistryConfTez;
 import org.apache.hadoop.hive.ql.exec.tez.TezProcessor.TezKVOutputCollector;
 import org.apache.hadoop.hive.ql.log.PerfLogger;
-import org.apache.hadoop.hive.ql.plan.BaseWork;
-import org.apache.hadoop.hive.ql.plan.DynamicValue;
-import org.apache.hadoop.hive.ql.plan.ReduceWork;
-import org.apache.hadoop.hive.ql.plan.TableDesc;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.tez.mapreduce.processor.MRTaskReporter;
@@ -76,7 +65,7 @@ public class ReduceRecordProcessor extends RecordProcessor {
   List<String> cacheKeys, dynamicValueCacheKeys;
 
   private final Map<Integer, DummyStoreOperator> connectOps =
-      new TreeMap<Integer, DummyStoreOperator>();
+          new TreeMap<Integer, DummyStoreOperator>();
   private final Map<Integer, ReduceWork> tagToReducerMap = new HashMap<Integer, ReduceWork>();
 
   private Operator<?> reducer;
@@ -95,12 +84,13 @@ public class ReduceRecordProcessor extends RecordProcessor {
     String cacheKey = processorContext.getTaskVertexName() + REDUCE_PLAN_KEY;
     cacheKeys = Lists.newArrayList(cacheKey);
     dynamicValueCacheKeys = new ArrayList<String>();
-    reduceWork = (ReduceWork) cache.retrieve(cacheKey, new Callable<Object>() {
-        @Override
-        public Object call() {
-          return Utilities.getReduceWork(jconf);
-      }
-    });
+    reduceWork = Utilities.getReduceWork(jconf);
+//    reduceWork = (ReduceWork) cache.retrieve(cacheKey, new Callable<Object>() {
+//      @Override
+//      public Object call() {
+//        return Utilities.getReduceWork(jconf);
+//      }
+//    });
 
     Utilities.setReduceWork(jconf, reduceWork);
     mergeWorkList = getMergeWorkList(jconf, cacheKey, queryId, cache, cacheKeys);
@@ -108,8 +98,8 @@ public class ReduceRecordProcessor extends RecordProcessor {
 
   @Override
   void init(
-      MRTaskReporter mrReporter, Map<String, LogicalInput> inputs,
-      Map<String, LogicalOutput> outputs) throws Exception {
+          MRTaskReporter mrReporter, Map<String, LogicalInput> inputs,
+          Map<String, LogicalOutput> outputs) throws Exception {
     perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.TEZ_INIT_OPERATORS);
     super.init(mrReporter, inputs, outputs);
 
@@ -161,6 +151,21 @@ public class ReduceRecordProcessor extends RecordProcessor {
     ((TezContext) MapredContext.get()).setTezProcessorContext(processorContext);
     int numTags = reduceWork.getTagToValueDesc().size();
     reducer = reduceWork.getReducer();
+
+    /**
+     * initilize dataflows coming to ReduceRecordProcessor.
+     */
+    if (InfoCollector.isGPU) {
+      InfoCollector.recordProcessorDataFlows = new DataFlow[numTags];
+      InfoCollector.recordProcessorInput = new GTable[numTags];
+      for (int i = 0; i < numTags; i++) {
+        InfoCollector.recordProcessorDataFlows[i] = new DataFlow(redWork.getTagToInput().get(i));
+        InfoCollector.getAllDataFlows().add(InfoCollector.recordProcessorDataFlows[i]);
+        InfoCollector.recordProcessorInput[i] = new GTable(redWork.getTagToInput().get(i));
+        InfoCollector.allInputs.add(InfoCollector.recordProcessorInput[i]);
+      }
+    }
+
     // Check immediately after reducer is assigned, in cae the abort came in during
     checkAbortCondition();
     // set memory available for operators
@@ -174,12 +179,12 @@ public class ReduceRecordProcessor extends RecordProcessor {
     // Setup values registry
     String valueRegistryKey = DynamicValue.DYNAMIC_VALUE_REGISTRY_CACHE_KEY;
     DynamicValueRegistryTez registryTez = dynamicValueCache.retrieve(valueRegistryKey,
-        new Callable<DynamicValueRegistryTez>() {
-          @Override
-          public DynamicValueRegistryTez call() {
-            return new DynamicValueRegistryTez();
-          }
-        });
+            new Callable<DynamicValueRegistryTez>() {
+              @Override
+              public DynamicValueRegistryTez call() {
+                return new DynamicValueRegistryTez();
+              }
+            });
     dynamicValueCacheKeys.add(valueRegistryKey);
     RegistryConfTez registryConf = new RegistryConfTez(jconf, reduceWork, processorContext, inputs);
     registryTez.init(registryConf);
@@ -201,7 +206,7 @@ public class ReduceRecordProcessor extends RecordProcessor {
         // Check immediately after reducer is assigned, in cae the abort came in during
         checkAbortCondition();
         initializeSourceForTag(redWork, i, mainWorkOIs, sources,
-            redWork.getTagToValueDesc().get(0), redWork.getTagToInput().get(0));
+                redWork.getTagToValueDesc().get(0), redWork.getTagToInput().get(0));
         reducer.initializeLocalWork(jconf);
       }
       reducer = reduceWork.getReducer();
@@ -304,6 +309,11 @@ public class ReduceRecordProcessor extends RecordProcessor {
 
   @Override
   void run() throws Exception {
+    l4j.info("SORT_END to [" + InfoCollector.getVertexName() + "] at time " + System.currentTimeMillis());
+    System.out.println("Profiling: GHive" +  InfoCollector.getVertexName() + " running starts at time:" + System.currentTimeMillis() + "ms");
+    Calendar calendar= Calendar.getInstance();
+    SimpleDateFormat dateFormat= new SimpleDateFormat("hh:mm:ss");
+    System.out.println(dateFormat.format(calendar.getTime()));
 
     for (Entry<String, LogicalOutput> outputEntry : outputs.entrySet()) {
       l4j.info("Starting Output: " + outputEntry.getKey());
@@ -315,10 +325,93 @@ public class ReduceRecordProcessor extends RecordProcessor {
 
     // run the operator pipeline
     startAbortChecks();
-    while (sources[bigTablePosition].pushRecord()) {
-      addRowAndMaybeCheckAbort();
+
+    if (InfoCollector.isGPU) {
+      //Collect Data from each source.
+      for (int tag = 0; tag < reduceWork.getTagToValueDesc().size(); tag++) {
+        while (sources[tag].pushRecord()) ;
+      }
+
+      l4j.info("Profiling: Tez 'Shuffle' on Reduce stage ending at time " + System.currentTimeMillis() + " ms");
+      System.out.println("Profiling: Tez 'Shuffle' on Reduce stage ending at time "
+              + System.currentTimeMillis() + " ms");
+      l4j.info("Profiling: Tez 'Processor' on Reduce stage starting at time "
+              + System.currentTimeMillis() + " ms");
+      System.out.println("Profiling: Tez 'Processor' on Reduce stage starting at time "
+              + System.currentTimeMillis() + " ms");
+
+      ReduceRecordSource source = sources[bigTablePosition];
+
+      //Get the process root operator.
+      Operator<?> reducer = source.getReducer();
+
+      //Traverse the operator tree, get the maintainValue list for each join operator.
+      traverse(reducer);
+
+      // Ready the collected data for JNI transformation.
+      JNIInterface.readyInputs();
+
+      // GPU Processing
+      GPUResult result = null;
+      if (InfoCollector.hasData) {
+        l4j.info("GHive: before JNIInterface.process().");
+        result = JNIInterface.process();
+        l4j.info("GHive: after JNIInterface.process().");
+        assert result != null;
+        try {
+//          System.out.println("GHive: result batch: " + result.generateBatch());
+        } catch (Exception e) {
+          e.printStackTrace();
+          System.exit(-1);
+        }
+      }
+      if (result != null) {
+        // Traverse the operator tree and get the sink operator.
+        // sink operator is always at the bottom of the tree.
+        Operator<?> sinkOp = reducer;
+        while (!sinkOp.getChildOperators().isEmpty()) {
+          sinkOp = sinkOp.getChildOperators().get(0);
+        }
+
+        // Integers in GPU are processed as long.
+        // Get the type information to do transformation.
+        ObjectInspector inspector = sinkOp.getInputObjInspectors()[0];
+        result.setInspectorType(inspector.toString());
+
+        // feed the computation result to the sink operator.
+        if (sinkOp instanceof VectorReduceSinkCommonOperator) {
+          l4j.info("GHive: sinkOp instance of VectorReduceSinkCommonOperator");
+          sinkOp.process(result.generateBatch(), 0);
+        } else if (sinkOp instanceof VectorFileSinkOperator) {
+          l4j.info("GHive: sinkOp instance of VectorFileSinkOperator");
+          while (result.hasNext()) {
+            Object obj = result.next();
+            ((VectorFileSinkOperator) sinkOp).processSingleRow(obj, 0);
+          }
+        } else if (sinkOp instanceof ReduceSinkOperator || sinkOp instanceof FileSinkOperator) {
+          l4j.info("GHive: sinkOp instance of ReduceSinkOperator or FileSinkOperator");
+          while (result.hasNext()) {
+            Object obj = result.next();
+            sinkOp.process(obj, 0);
+          }
+        }
+      } else {
+        l4j.info("GHive: no result in this " + InfoCollector.getVertexName());
+      }
+    } else {
+      l4j.info("Profiling: Tez 'Processor' on Reduce stage starting at time "
+              + System.currentTimeMillis() + " ms");
+      while (sources[bigTablePosition].pushRecord()) {
+        addRowAndMaybeCheckAbort();
+      }
     }
+    System.out.println("Profiling: GHive" +  InfoCollector.getVertexName() + " running ends at time:" + System.currentTimeMillis() + "ms");
+    calendar= Calendar.getInstance();
+    dateFormat= new SimpleDateFormat("hh:mm:ss");
+    System.out.println(dateFormat.format(calendar.getTime()));
+
   }
+
 
   @Override
   public void abort() {
@@ -404,7 +497,7 @@ public class ReduceRecordProcessor extends RecordProcessor {
         // signal new failure to map-reduce
         l4j.error("Hit error while closing operators - failing tree");
         throw new RuntimeException(
-            "Hive Runtime Error while closing operators: " + e.getMessage(), e);
+                "Hive Runtime Error while closing operators: " + e.getMessage(), e);
       }
     } finally {
       Utilities.clearWorkMap(jconf);
@@ -419,7 +512,7 @@ public class ReduceRecordProcessor extends RecordProcessor {
           return (DummyStoreOperator) childOp;
         } else {
           throw new IllegalStateException("Was expecting dummy store operator but found: "
-              + childOp);
+                  + childOp);
         }
       } else {
         return getJoinParentOp(childOp);

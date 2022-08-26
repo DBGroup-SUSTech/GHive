@@ -21,6 +21,7 @@ package org.apache.hadoop.hive.ql.exec.vector.keyseries;
 import java.io.IOException;
 import java.util.Arrays;
 
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.exec.vector.expressions.StringExpr;
@@ -48,7 +49,17 @@ public class VectorKeySeriesBytesSerialized<T extends SerializeWrite>
     currentBatchSize = batch.size;
     Preconditions.checkState(currentBatchSize > 0);
 
-    BytesColumnVector bytesColVector = (BytesColumnVector) batch.cols[columnNum];
+    BytesColumnVector bytesColVector;
+    if (InfoCollector.isGPU) {
+      bytesColVector = (BytesColumnVector) batch.cols[0];
+      duplicateCounts = new int [currentBatchSize];
+      seriesIsAllNull = new boolean [currentBatchSize];
+      hashCodes = new int[currentBatchSize];
+      serializedKeyLengths = new int [currentBatchSize];
+    } else {
+      bytesColVector = (BytesColumnVector) batch.cols[columnNum];
+    }
+
 
     byte[][] vectorBytesArrays = bytesColVector.vector;
     int[] vectorStarts = bytesColVector.start;

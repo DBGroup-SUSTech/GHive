@@ -78,6 +78,7 @@ public class SelectOperator extends Operator<SelectDesc> implements Serializable
 
   @Override
   public void process(Object row, int tag) throws HiveException {
+    processStartTime = System.nanoTime();
     if (isSelectStarNoCompute) {
       forward(row, inputObjInspectors[tag]);
       return;

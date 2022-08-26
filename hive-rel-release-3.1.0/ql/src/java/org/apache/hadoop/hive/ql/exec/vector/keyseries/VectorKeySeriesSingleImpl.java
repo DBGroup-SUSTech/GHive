@@ -20,6 +20,7 @@ package org.apache.hadoop.hive.ql.exec.vector.keyseries;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import com.google.common.base.Preconditions;
 
@@ -41,10 +42,10 @@ public abstract class VectorKeySeriesSingleImpl extends VectorKeySeriesImpl
   protected int seriesPosition;
 
   // The number of duplicates for each series key (NULL or non-NULL).
-  protected final int[] duplicateCounts;
+  protected int[] duplicateCounts;
 
   // Whether a series key is NULL.
-  protected final boolean[] seriesIsAllNull;
+  protected boolean[] seriesIsAllNull;
 
   // The number of non-NULL keys.  They have associated hash codes and key data. 
   protected int nonNullKeyCount;
@@ -53,7 +54,7 @@ public abstract class VectorKeySeriesSingleImpl extends VectorKeySeriesImpl
   protected int nonNullKeyPosition;
 
   // The hash code for each non-NULL key.
-  protected final int[] hashCodes;
+  protected int[] hashCodes;
 
   VectorKeySeriesSingleImpl() {
     super();
@@ -61,13 +62,15 @@ public abstract class VectorKeySeriesSingleImpl extends VectorKeySeriesImpl
     seriesCount = 0;
     seriesPosition = 0;
 
-    duplicateCounts = new int[VectorizedRowBatch.DEFAULT_SIZE];
-    seriesIsAllNull = new boolean[VectorizedRowBatch.DEFAULT_SIZE];
+    if (!InfoCollector.isGPU) {
+      duplicateCounts = new int[VectorizedRowBatch.DEFAULT_SIZE];
+      seriesIsAllNull = new boolean[VectorizedRowBatch.DEFAULT_SIZE];
+      hashCodes = new int[VectorizedRowBatch.DEFAULT_SIZE];
+    }
 
     nonNullKeyCount = 0;
     nonNullKeyPosition = -1;
 
-    hashCodes = new int[VectorizedRowBatch.DEFAULT_SIZE];
   }
 
   public boolean validate() {

@@ -21,6 +21,9 @@ package org.apache.hadoop.hive.ql.exec.vector.keyseries;
 import java.io.IOException;
 import java.util.Arrays;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.serde2.fast.SerializeWrite;
@@ -38,6 +41,7 @@ public class VectorKeySeriesLongSerialized<T extends SerializeWrite>
   private final int columnNum;
   private PrimitiveCategory primitiveCategory;
 
+  private static final Log LOG = LogFactory.getLog(VectorKeySeriesLongSerialized.class.getName());
   private int currentKeyStart;
 
   public VectorKeySeriesLongSerialized(int columnNum, PrimitiveTypeInfo primitiveTypeInfo,
@@ -51,9 +55,19 @@ public class VectorKeySeriesLongSerialized<T extends SerializeWrite>
   public void processBatch(VectorizedRowBatch batch) throws IOException {
 
     currentBatchSize = batch.size;
+
     Preconditions.checkState(currentBatchSize > 0);
 
-    LongColumnVector longColVector = (LongColumnVector) batch.cols[columnNum];
+    LongColumnVector longColVector;
+    if (InfoCollector.isGPU) {
+      longColVector = (LongColumnVector) batch.cols[0];
+      duplicateCounts = new int [currentBatchSize];
+      seriesIsAllNull = new boolean [currentBatchSize];
+      hashCodes = new int[currentBatchSize];
+      serializedKeyLengths = new int [currentBatchSize];
+    } else {
+      longColVector = (LongColumnVector) batch.cols[columnNum];
+    }
 
     long[] vector = longColVector.vector;
 

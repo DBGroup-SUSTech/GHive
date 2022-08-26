@@ -18,6 +18,7 @@
 package org.apache.hadoop.hive.ql.exec;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -26,6 +27,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.ql.exec.persistence.RowContainer;
 import org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
+import org.apache.hadoop.hive.ql.plan.ExprNodeColumnDesc;
 import org.apache.hadoop.hive.ql.plan.ExprNodeDesc;
 import org.apache.hadoop.hive.ql.plan.JoinDesc;
 import org.apache.hadoop.hive.ql.plan.TableDesc;
@@ -141,6 +143,42 @@ public class JoinUtil {
           valueFields.add(null);
         } else {
           valueFields.add(ExprNodeEvaluatorFactory.get(expr, conf));
+        }
+      }
+      outMap[key] = valueFields;
+      total += valueFields.size();
+    }
+
+    return total;
+  }
+
+
+
+  public static int populateAndMaintainJoinValue(List<ExprNodeEvaluator>[] outMap,
+                                         Map<Byte, List<ExprNodeDesc>> inputMap,
+                                         Byte[] order,
+                                         int posBigTableAlias, Configuration conf,
+                                         Map<Byte, List<String>> maintainValues) throws HiveException {
+    int total = 0;
+    for (Entry<Byte, List<ExprNodeDesc>> e : inputMap.entrySet()) {
+      if (e.getValue() == null) {
+        continue;
+      }
+      Byte key = order == null ? e.getKey() : order[e.getKey()];
+      maintainValues.put(key, new ArrayList<>());
+      List<ExprNodeEvaluator> valueFields = new ArrayList<ExprNodeEvaluator>();
+      for (ExprNodeDesc expr : e.getValue()) {
+        if (key == (byte) posBigTableAlias) {
+          valueFields.add(null);
+        } else {
+          ExprNodeEvaluator evaluator = ExprNodeEvaluatorFactory.get(expr, conf);
+          valueFields.add(evaluator);
+          ExprNodeDesc desc = evaluator.getExpr();
+          if (desc instanceof ExprNodeColumnDesc) {
+            maintainValues.get(key).add(((ExprNodeColumnDesc)desc).getColumn());
+          } else {
+            maintainValues.get(key).add(desc.toString());
+          }
         }
       }
       outMap[key] = valueFields;

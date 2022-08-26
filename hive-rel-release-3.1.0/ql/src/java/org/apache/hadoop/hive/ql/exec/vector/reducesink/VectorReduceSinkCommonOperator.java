@@ -31,6 +31,7 @@ import org.apache.hadoop.hive.ql.exec.Operator;
 import org.apache.hadoop.hive.ql.exec.TerminalOperator;
 import org.apache.hadoop.hive.ql.exec.TopNHash;
 import org.apache.hadoop.hive.ql.exec.Utilities;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorSerializeRow;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizationContext;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizationContextRegion;
@@ -291,6 +292,14 @@ public abstract class VectorReduceSinkCommonOperator extends TerminalOperator<Re
     if (!isEmptyValue) {
       valueLazyBinarySerializeWrite = new LazyBinarySerializeWrite(reduceSinkValueColumnMap.length);
 
+      if (InfoCollector.isGPU && reduceSinkKeyColumnMap != null) {
+        // GHive: last (colNum - keyNum) columns are values.
+//        if (InfoCollector.getVertexName().matches("Reducer [0-9]*")) {
+        for (int i = 0; i < reduceSinkValueColumnMap.length; i++) {
+          reduceSinkValueColumnMap[i] = reduceSinkKeyColumnMap.length + i;
+        }
+//        }
+      }
       valueVectorSerializeRow =
           new VectorSerializeRow<LazyBinarySerializeWrite>(
               valueLazyBinarySerializeWrite);

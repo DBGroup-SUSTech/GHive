@@ -94,7 +94,11 @@ public class SetReducerParallelism implements NodeProcessor {
 
         int numReducers = Utilities.estimateReducers(numberOfBytes, bytesPerReducer,
             maxReducers, false);
-        LOG.info("Set parallelism for reduce sink "+sink+" to: "+numReducers);
+        // To make better utilize the data parallelism of GPU.
+        // Actually, It should not be divided by 10 in CPU.
+        // It sometimes takes shorter time on CPU, sometimes longer with higher parallelism.
+        // The data parallelism w.r.t running time is another interesting problem, which is ignored here.
+        numReducers = (int)Math.ceil(numReducers / 10.0);
         desc.setNumReducers(numReducers);
 
         final Collection<ExprNodeDescEqualityWrapper> keyCols = ExprNodeDescEqualityWrapper.transform(desc.getKeyCols());

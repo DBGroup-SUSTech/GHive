@@ -18,6 +18,7 @@
 
 package org.apache.hadoop.hive.ql.exec.vector.keyseries;
 
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.serde2.ByteStream.Output;
 import org.apache.hadoop.hive.serde2.fast.SerializeWrite;
@@ -43,13 +44,15 @@ public abstract class VectorKeySeriesSerializedImpl<T extends SerializeWrite>
 
   protected final Output output;
 
-  protected final int[] serializedKeyLengths;
+  protected int[] serializedKeyLengths;
 
   public VectorKeySeriesSerializedImpl(T serializeWrite) {
     super();
     this.serializeWrite = serializeWrite;
     output = new Output();
-    serializedKeyLengths = new int[VectorizedRowBatch.DEFAULT_SIZE];
+    if (!InfoCollector.isGPU) {
+      serializedKeyLengths = new int[VectorizedRowBatch.DEFAULT_SIZE];
+    }
   }
 
   public boolean validate() {

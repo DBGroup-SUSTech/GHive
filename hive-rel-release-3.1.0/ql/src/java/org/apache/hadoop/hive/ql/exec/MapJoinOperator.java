@@ -34,6 +34,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import org.apache.hadoop.hive.ql.CompilationOpContext;
 import org.apache.hadoop.hive.ql.HashTableLoaderFactory;
+import org.apache.hadoop.hive.ql.exec.ghive.InfoCollector;
 import org.apache.hadoop.hive.ql.exec.mr.ExecMapperContext;
 import org.apache.hadoop.hive.ql.exec.persistence.BytesBytesMultiHashMap;
 import org.apache.hadoop.hive.ql.exec.persistence.HybridHashTableContainer;
@@ -201,10 +202,19 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
         LOG.debug("This is not bucket map join, so cache");
       }
 
-      Future<Pair<MapJoinTableContainer[], MapJoinTableContainerSerDe[]>> future =
-          cache.retrieveAsync(
-              cacheKey, () ->loadHashTable(mapContext, mrContext));
-      asyncInitOperations.add(future);
+
+      if (InfoCollector.isGPU) {
+        long start = System.nanoTime();
+        loadHashTable(mapContext, mrContext);
+        long end = System.nanoTime();
+        LOG.info("[Hive Operator Time] " + Operator.Counter.RECORDS_OUT_OPERATOR.name() + "_" + getOperatorId() + ": " +
+                "load has table time: " + (end - start) + "ns");
+      } else {
+        Future<Pair<MapJoinTableContainer[], MapJoinTableContainerSerDe[]>> future =
+            cache.retrieveAsync(
+                cacheKey, () ->loadHashTable(mapContext, mrContext));
+        asyncInitOperations.add(future);
+      }
     } else if (!isInputFileChangeSensitive(mapContext)) {
       loadHashTable(mapContext, mrContext);
       hashTblInitedOnce = true;
@@ -332,7 +342,12 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
     perfLogger.PerfLogBegin(CLASS_NAME, PerfLogger.LOAD_HASHTABLE);
     loader.init(mapContext, mrContext, hconf, this);
     try {
-      loader.load(mapJoinTables, mapJoinTableSerdes);
+      if (InfoCollector.isGPU && loader instanceof org.apache.hadoop.hive.ql.exec.tez.HashTableLoader) {
+        ((org.apache.hadoop.hive.ql.exec.tez.HashTableLoader)loader).GPUSmallLoad(mapJoinTables, mapJoinTableSerdes);
+      } else {
+        LOG.info("GHive warn: loader type is " + loader.getClass());
+        loader.load(mapJoinTables, mapJoinTableSerdes);
+      }
     } catch (HiveException e) {
       if (LOG.isInfoEnabled()) {
         LOG.info("Exception loading hash tables. Clearing partially loaded hash table containers.");
@@ -427,8 +442,16 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
     return null; // All join tables have 0 keys, doesn't matter what we generate.
   }
 
+  boolean hasPrintStart = false;
   @Override
   public void process(Object row, int tag) throws HiveException {
+    processStartTime = System.nanoTime();
+    if (!hasPrintStart) {
+      startTime = System.currentTimeMillis();
+      LOG.info("Operator [" + getOperatorId() + "] starts at: " + startTime);
+      processStartTime = System.nanoTime();
+      hasPrintStart = true;
+    }
     try {
       alias = (byte) tag;
       if (hashMapRowGetters == null) {
@@ -546,6 +569,8 @@ public class MapJoinOperator extends AbstractMapJoinOperator<MapJoinDesc> implem
 
   @Override
   public void closeOp(boolean abort) throws HiveException {
+    endTime = System.currentTimeMillis();
+    LOG.info("Operator [" + getOperatorId() + "] ends at: " + endTime);
     boolean spilled = false;
     for (MapJoinTableContainer container : mapJoinTables) {
       if (container != null) {
