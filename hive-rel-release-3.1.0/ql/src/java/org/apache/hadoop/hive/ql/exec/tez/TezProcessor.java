@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -264,6 +264,23 @@ public class TezProcessor extends AbstractLogicalIOProcessor {
       // which does not belong to the lock, the abort will end up getting blocked.
       // Both of these method invocations need to handle the abort call on their own.
       rproc.init(mrReporter, inputs, outputs);
+      boolean isMap = RecordProcessor.vertexName.contains("Map");
+      if (isMap) {
+        System.out.println("Profiling: Tez 'Input' on Reduce stage ending at time "
+                + System.currentTimeMillis() + " ms");
+        LOG.info("Profiling: Tez 'Processor' on Map stage starting at time "
+                + System.currentTimeMillis() + " ms");
+        System.out.println("Profiling: Tez 'Processor' on Map stage starting at time "
+                + System.currentTimeMillis() + " ms");
+      } else {
+        LOG.info("Profiling: Tez 'Shuffle' on Reduce stage ending at time " + System.currentTimeMillis() + " ms");
+        System.out.println("Profiling: Tez 'Shuffle' on Reduce stage ending at time "
+                + System.currentTimeMillis() + " ms");
+        LOG.info("Profiling: Tez 'Processor' on Reduce stage starting at time "
+                + System.currentTimeMillis() + " ms");
+        System.out.println("Profiling: Tez 'Processor' on Reduce stage starting at time "
+                + System.currentTimeMillis() + " ms");
+      }
       rproc.run();
 
       //done - output does not need to be committed as hive does not use outputcommitter

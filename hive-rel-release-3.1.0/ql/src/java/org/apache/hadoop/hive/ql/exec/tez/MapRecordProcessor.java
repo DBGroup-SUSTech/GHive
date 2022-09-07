@@ -415,10 +415,12 @@ public class MapRecordProcessor extends RecordProcessor {
 
   @Override
   void run() throws Exception {
+    System.out.println("Profiling: Hive " + RecordProcessor.vertexName + " running starts at time: " + System.currentTimeMillis() + " ms\n");
     startAbortChecks();
     while (sources[position].pushRecord()) {
       addRowAndMaybeCheckAbort();
     }
+    System.out.println("Profiling: Hive " + RecordProcessor.vertexName + " running ends at time: " + System.currentTimeMillis() + " ms\n");
   }
 
   @Override

@@ -93,6 +93,9 @@ public class ReduceRecordProcessor extends RecordProcessor {
     dynamicValueCache = ObjectCacheFactory.getCache(jconf, queryId, false, true);
 
     String cacheKey = processorContext.getTaskVertexName() + REDUCE_PLAN_KEY;
+    System.out.println("haotian-cacheKey: " + cacheKey);
+    System.out.println("haotian-queryId: " + queryId);
+
     cacheKeys = Lists.newArrayList(cacheKey);
     dynamicValueCacheKeys = new ArrayList<String>();
     reduceWork = (ReduceWork) cache.retrieve(cacheKey, new Callable<Object>() {
@@ -117,10 +120,12 @@ public class ReduceRecordProcessor extends RecordProcessor {
     List<LogicalInput> shuffleInputs = getShuffleInputs(inputs);
     // TODO HIVE-14042. Move to using a loop and a timed wait once TEZ-3302 is fixed.
     checkAbortCondition();
+    System.out.println("haotian-waiting before for shuffleInputs to become ready " + System.currentTimeMillis());
     if (shuffleInputs != null) {
       l4j.info("Waiting for ShuffleInputs to become ready");
       processorContext.waitForAllInputsReady(new ArrayList<Input>(shuffleInputs));
     }
+    System.out.println("haotian-waiting after for shuffleInputs to become ready " + System.currentTimeMillis());
 
     connectOps.clear();
     ReduceWork redWork = reduceWork;
@@ -128,11 +133,14 @@ public class ReduceRecordProcessor extends RecordProcessor {
     List<HashTableDummyOperator> workOps = reduceWork.getDummyOps();
     HashSet<HashTableDummyOperator> dummyOps = workOps == null ? null : new HashSet<>(workOps);
     tagToReducerMap.put(redWork.getTag(), redWork);
+    System.out.println("haotian-redWork.getTag(): " + redWork.getTag());
+    System.out.println("haotian-redWork" + redWork.getName());
     if (mergeWorkList != null) {
       for (BaseWork mergeWork : mergeWorkList) {
         if (l4j.isDebugEnabled()) {
           l4j.debug("Additional work " + mergeWork.getName());
         }
+        System.out.println("haotian-addtional work " + mergeWork.getName());
         workOps = mergeWork.getDummyOps();
         if (workOps != null) {
           if (dummyOps == null) {
@@ -148,6 +156,8 @@ public class ReduceRecordProcessor extends RecordProcessor {
         DummyStoreOperator dummyStoreOp = getJoinParentOp(reducer);
         connectOps.put(mergeReduceWork.getTag(), dummyStoreOp);
         tagToReducerMap.put(mergeReduceWork.getTag(), mergeReduceWork);
+        System.out.println("haotian-mergeReduceWork.getTag(): " + mergeReduceWork.getTag());
+        System.out.println("haotian-mergeReduceWork.mergeReduceWork: " + mergeReduceWork.getName());
       }
 
       ((TezContext) MapredContext.get()).setDummyOpsMap(connectOps);
@@ -155,11 +165,13 @@ public class ReduceRecordProcessor extends RecordProcessor {
     checkAbortCondition();
 
     bigTablePosition = (byte) reduceWork.getTag();
+    System.out.println("haotian-bigTablePosition: " + reduceWork.getTag());
 
     ObjectInspector[] mainWorkOIs = null;
     ((TezContext) MapredContext.get()).setInputs(inputs);
     ((TezContext) MapredContext.get()).setTezProcessorContext(processorContext);
     int numTags = reduceWork.getTagToValueDesc().size();
+    System.out.println("haotian-numTags: " + numTags);
     reducer = reduceWork.getReducer();
     // Check immediately after reducer is assigned, in cae the abort came in during
     checkAbortCondition();
@@ -305,6 +317,7 @@ public class ReduceRecordProcessor extends RecordProcessor {
   @Override
   void run() throws Exception {
 
+    System.out.println("Profiling: Hive " + RecordProcessor.vertexName + " running starts at time: " + System.currentTimeMillis() + " ms\n");
     for (Entry<String, LogicalOutput> outputEntry : outputs.entrySet()) {
       l4j.info("Starting Output: " + outputEntry.getKey());
       if (!isAborted()) {
@@ -318,6 +331,7 @@ public class ReduceRecordProcessor extends RecordProcessor {
     while (sources[bigTablePosition].pushRecord()) {
       addRowAndMaybeCheckAbort();
     }
+    System.out.println("Profiling: Hive " + RecordProcessor.vertexName + " running ends at time: " + System.currentTimeMillis() + " ms\n");
   }
 
   @Override

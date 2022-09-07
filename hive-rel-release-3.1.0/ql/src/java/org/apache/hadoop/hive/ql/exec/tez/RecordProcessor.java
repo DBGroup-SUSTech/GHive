@@ -61,9 +61,12 @@ public abstract class RecordProcessor extends InterruptibleProcessing {
   protected PerfLogger perfLogger = SessionState.getPerfLogger();
   protected String CLASS_NAME = RecordProcessor.class.getName();
 
+  public static String vertexName;
+
   public RecordProcessor(JobConf jConf, ProcessorContext processorContext) {
     this.jconf = jConf;
     this.processorContext = processorContext;
+    vertexName = processorContext.getTaskVertexName();
   }
 
   /**

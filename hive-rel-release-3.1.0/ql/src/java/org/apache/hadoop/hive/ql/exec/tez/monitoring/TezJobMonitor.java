@@ -276,6 +276,7 @@ public class TezJobMonitor {
         }
       } finally {
         if (done) {
+          System.out.println("total-time: "+(System.currentTimeMillis()-executionStartTime));
           if (wmContext != null && done) {
             wmContext.setQueryCompleted(true);
           }
