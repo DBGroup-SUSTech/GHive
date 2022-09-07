@@ -317,6 +317,7 @@ public class ReduceRecordProcessor extends RecordProcessor {
   @Override
   void run() throws Exception {
 
+    long start = System.currentTimeMillis();
     System.out.println("Profiling: Hive " + RecordProcessor.vertexName + " running starts at time: " + System.currentTimeMillis() + " ms\n");
     for (Entry<String, LogicalOutput> outputEntry : outputs.entrySet()) {
       l4j.info("Starting Output: " + outputEntry.getKey());
@@ -332,6 +333,8 @@ public class ReduceRecordProcessor extends RecordProcessor {
       addRowAndMaybeCheckAbort();
     }
     System.out.println("Profiling: Hive " + RecordProcessor.vertexName + " running ends at time: " + System.currentTimeMillis() + " ms\n");
+    long end = System.currentTimeMillis();
+    System.out.println("Profiling: Hive " + RecordProcessor.vertexName + " takes time: " + (end - start) + " ms\n");
   }
 
   @Override
