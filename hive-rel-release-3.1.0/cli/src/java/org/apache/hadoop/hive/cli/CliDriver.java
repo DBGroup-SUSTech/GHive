@@ -34,6 +34,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.alibaba.fastjson.JSON;
 import com.google.common.base.Splitter;
 
 import com.google.gson.Gson;
@@ -50,6 +51,7 @@ import jline.console.completer.ArgumentCompleter.AbstractArgumentDelimiter;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -100,8 +102,11 @@ public class CliDriver {
   public static final int LINES_TO_FETCH = 40; // number of lines to fetch in batch from remote hive server
   public static final int DELIMITED_CANDIDATE_THRESHOLD = 10;
 
-  public static final String HIVERCFILE = ".hiverc";
+  static Map<String, Vertex> vertexMap = new HashMap<>();
+  static Map<String, ArrayList<String>> dependencyMap = new HashMap<>();
+  static Map<String, Double> thetaMap = new HashMap<>();
 
+  public static final String HIVERCFILE = ".hiverc";
   private final LogHelper console;
   protected ConsoleReader reader;
   private Configuration conf;
@@ -224,86 +229,6 @@ public class CliDriver {
     return cmd.split("\\s+");
   }
 
-  static long calcuEstimateTime(Node node,boolean isGpu){
-    // In case-by-case experiments, we adjust such parameters cautiously to reflect the exact time.
-    // Here, we make them simple to suit the general case.
-    // This has little affect on job placement and time-consuming.
-    // Linear cost models work well if cardinality estimations (CEs) are accurate [Viktor Leis’VLDB15],
-    // and they are adopted by production systems such as PostgreSQL.
-    long time=0;
-    int cpuMergJoinKey=20;
-    int gpuMergJoinKey=1;
-    int cpuMapJoinKey=5;
-    int gpuMapJoinKey=1;
-    int cpuSelectKey=1;
-    int gpuSelectKey=1;
-    int cpuGroupByKey=5;
-    int gpuGroupByKey=1;
-    int cpuFilterKey=1;
-    int gpuFilterKey=2;
-    if(isGpu){
-      if (node.str.startsWith("[MAPJOIN")) {
-        time= (long) (node.children.get(0).rows + node.children.get(1).rows) *gpuMapJoinKey;
-      } else if (node.str.startsWith("[MERGEJOIN")) {
-        time= (long) (node.children.get(0).rows + node.children.get(1).rows) *gpuMergJoinKey;
-      } else if (node.str.startsWith("[SEL")) {
-        time= (long) node.rows *gpuSelectKey;
-      } else if (node.str.startsWith("[GBY")) {
-        time= (long) node.children.get(0).rows *gpuGroupByKey;
-      } else if (node.str.startsWith("[FIL")) {
-        time= (long) node.children.get(0).rows *gpuFilterKey;
-      }
-    }else{
-      if (node.str.startsWith("[MAPJOIN")) {
-        time= (long)(node.children.get(0).rows+node.children.get(1).rows)*cpuMapJoinKey;
-      } else if (node.str.startsWith("[MERGEJOIN")) {
-        time= (long)(node.children.get(0).rows+node.children.get(1).rows)*cpuMergJoinKey;
-      } else if (node.str.startsWith("[SEL")) {
-        time=(long)node.rows*cpuSelectKey;
-      } else if (node.str.startsWith("[GBY")) {
-        time=(long)node.children.get(0).rows*cpuGroupByKey;
-      }else if (node.str.startsWith("[FIL")) {
-        time=(long)node.children.get(0).rows*cpuFilterKey;
-      }
-    }
-    return time;
-  }
-  static long traverseTree(Node root,boolean isGpu){
-    long ans=0;
-    ans+=calcuEstimateTime(root,isGpu);
-    if (root.children!=null) {
-      for (Node node : root.children) {
-        ans += traverseTree(node, isGpu);
-      }
-    }
-    return ans;
-  }
-  static void traverseDAG(HashMap<String, Boolean> res, Vertex vertex){
-    Node root= vertex.subTree.get(0);
-    long vertexGpuTime=traverseTree(root,true);
-    long vertexCpuTime=traverseTree(root,false);
-    //System.out.println(vertex.str+" cpu "+vertexCpuTime+" gpu "+vertexGpuTime);
-    double theta = 0.2;
-    System.out.println("vertexCPUTime: " + vertexCpuTime);
-    System.out.println("vertexGPUTime: " + vertexGpuTime);
-    if(vertexCpuTime * (1 + theta) <vertexGpuTime){
-      res.put(vertex.str,false);
-      System.out.println(vertex.str);
-    }
-    if (vertex.children!=null) {
-      for (Vertex v : vertex.children) {
-        traverseDAG(res, v);
-      }
-    }
-  }
-  static String costModelProfiling(String parsedPlan, String extendedPlan){
-    List<Vertex> dag = new Gson().fromJson(parsedPlan, new TypeToken<List<Vertex>>(){}.getType());
-    HashMap<String, Boolean> res = new HashMap<>();
-    traverseDAG(res, dag.get(0));
-    Gson gson = new Gson();
-    Type gsonType = new TypeToken<HashMap<String, Boolean>>() {}.getType();
-    return gson.toJson(res, gsonType);
-  }
   static String vertexValidateCheck(String plan, String extendedPlan) {
     ArrayList<String> op = new ArrayList<>();
     Set<String> ignoreVertices = new HashSet<>();
@@ -408,6 +333,45 @@ public class CliDriver {
     return gson.toJson(res, gsonType);
   }
 
+  public static void traverseVertices(Vertex v) {
+    if (Pattern.matches("(Map [0-9]+)|(Reducer [0-9]+)", v.str)) {
+      vertexMap.put(v.str, v);
+    }
+    if (v.children != null) {
+      for (Vertex child : v.children) {
+        if (Pattern.matches("(Map [0-9]+)|(Reducer [0-9]+)", child.str)) {
+          if (!dependencyMap.containsKey(v.str)) {
+            dependencyMap.put(v.str, new ArrayList<String>());
+          }
+          dependencyMap.get(v.str).add(child.str);
+
+        }
+        traverseVertices(child);
+      }
+    }
+  }
+
+
+  static String makeDecision() {
+    Iterator<Map.Entry<String, Vertex>> iterator = vertexMap.entrySet().iterator();
+    HashMap<String, Boolean> res = new HashMap<>();
+    while (iterator.hasNext()) {
+      Map.Entry<String, Vertex> entry = iterator.next();
+      double CPUCost =  CostModel.traverseAndEstimate(entry.getValue().subTree.get(0), entry.getKey(), false);
+      double GPUCost =  CostModel.traverseAndEstimate(entry.getValue().subTree.get(0), entry.getKey(), true);
+      double theta = 0.2;
+      if (thetaMap.containsKey(entry.getKey())) {
+        theta = thetaMap.get(entry.getKey());
+      }
+      if ((CPUCost - GPUCost) / CPUCost <= theta) {
+        res.put(entry.getKey(), false);
+      }
+    }
+    Gson gson = new Gson();
+    Type gsonType = new TypeToken<HashMap<String, Boolean>>() {}.getType();
+    return gson.toJson(res, gsonType);
+  }
+
 
   int processLocalCmd(String cmd, CommandProcessor proc, CliSessionState ss) {
     boolean escapeCRLF = HiveConf.getBoolVar(conf, HiveConf.ConfVars.HIVE_CLI_PRINT_ESCAPE_CRLF);
@@ -459,9 +423,36 @@ public class CliDriver {
             Path explainPath = new Path("/tmp/plan/explain.txt");
             Path explainExtendedPath = new Path("/tmp/plan/explain_extended.txt");
             Path ignoreVertexPath = new Path("/tmp/plan/ignore_vertices.txt");
+            Path thetaPath = new Path("/tmp/plan/theta.txt");
+
+            StringBuilder builder = new StringBuilder();
+            byte[] buffer=new byte[4096];
+            int bytesRead;
+            try{
+              FSDataInputStream thetaIn = fs.open(thetaPath);
+              while ((bytesRead = thetaIn.read(buffer)) > 0) {
+                builder.append(new String(buffer, 0, bytesRead));
+              }
+              thetaIn.close();
+              thetaMap = new Gson().fromJson(builder.toString(),
+                      new com.google.common.reflect.TypeToken<HashMap<String, Boolean>>(){}.getType());
+            } catch (IOException ex) {
+              ex.printStackTrace();
+            }
+
+
             PlanParser planParser = new PlanParser();
-            String dagJson = planParser.parsePlan(explainPlan.toString());
-            String ignoreJsonString = costModelProfiling(dagJson, explainExtendedPlan.toString());
+            String dagJsonStr = JSON.toJSONString(planParser.parsePlan(explainPlan.toString()));
+            List<Vertex> vertices = planParser.parsePlan(explainPlan.toString());
+            String dagJson = JSON.toJSONString(vertices, true);
+
+            for (Vertex v: vertices) {
+              traverseVertices(v);
+            }
+
+
+            String ignoreJsonString = makeDecision();
+            //costModelProfiling(dagJson, explainExtendedPlan.toString());
             System.out.println("ignoreJsonString:" + ignoreJsonString);
             FSDataOutputStream explainOut = fs.create(explainPath, true);
             FSDataOutputStream explainExtendedOut = fs.create(explainExtendedPath, true);
@@ -475,7 +466,7 @@ public class CliDriver {
 
             Path DAGJsonPath = new Path("/tmp/plan/dag.txt");
             FSDataOutputStream DAGJsonOut = fs.create(DAGJsonPath, true);
-            DAGJsonOut.write(dagJson.getBytes(StandardCharsets.UTF_8), 0, dagJson.length());
+            DAGJsonOut.write(dagJsonStr.getBytes(StandardCharsets.UTF_8), 0, dagJson.length());
             DAGJsonOut.close();
           }
         } catch (Exception e) {

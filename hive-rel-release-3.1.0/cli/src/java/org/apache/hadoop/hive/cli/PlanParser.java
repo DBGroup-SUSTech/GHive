@@ -104,7 +104,7 @@ public class PlanParser {
         return rootList;
     }
 
-    public String parsePlan(String planString) throws IOException {
+    public List<Vertex> parsePlan(String planString) throws IOException {
         Pattern operator = Pattern.compile("\\[[^\\[]*\\]");  //obtain name fragment in []
         Pattern info = Pattern.compile("(\\([^\\)]*\\))");   //obtain rows and width in ()
         Pattern vertex=Pattern.compile("(Map|Reducer) [0-9]+");   //obtain vertex with Map/Reducer + num
@@ -220,7 +220,8 @@ public class PlanParser {
         }
         List<Node> root = getTree(li);
         dag = getDAG(dag,root);
-        return JSON.toJSONString(dag, true);
+        return dag;
+//        return JSON.toJSONString(dag, true);
     }
     public static List<Node> getSubTree(List<Node> li, String require) throws IOException {
         Queue<Node> queue = new LinkedList<>();
