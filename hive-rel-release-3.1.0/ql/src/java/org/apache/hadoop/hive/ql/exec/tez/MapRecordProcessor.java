@@ -419,6 +419,9 @@ public class MapRecordProcessor extends RecordProcessor {
 
   @Override
   void run() throws Exception {
+    long runStart = System.currentTimeMillis();
+    System.out.println("Profiling: GHive " +  InfoCollector.getVertexName() + " running starts at time: " + runStart +  "ms");
+
     VectorMapOperator mapRoot  = (VectorMapOperator)sources[position].getMapper();
 
 
@@ -492,6 +495,10 @@ public class MapRecordProcessor extends RecordProcessor {
         addRowAndMaybeCheckAbort();
       }
     }
+    long runEnd = System.currentTimeMillis();
+    System.out.println("Profiling: GHive " +  InfoCollector.getVertexName() + " running ends at time: " + runEnd + "ms");
+    System.out.println("Profiling: GHive " +  InfoCollector.getVertexName() + " takes time: " + (runEnd - runStart) + "ms");
+
   }
 
 

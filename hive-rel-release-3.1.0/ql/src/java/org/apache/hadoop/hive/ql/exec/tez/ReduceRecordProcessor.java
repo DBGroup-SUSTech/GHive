@@ -310,7 +310,8 @@ public class ReduceRecordProcessor extends RecordProcessor {
   @Override
   void run() throws Exception {
     l4j.info("SORT_END to [" + InfoCollector.getVertexName() + "] at time " + System.currentTimeMillis());
-    System.out.println("Profiling: GHive" +  InfoCollector.getVertexName() + " running starts at time:" + System.currentTimeMillis() + "ms");
+    long runStart = System.currentTimeMillis();
+    System.out.println("Profiling: GHive " +  InfoCollector.getVertexName() + " running starts at time: " + runStart +  "ms");
     Calendar calendar= Calendar.getInstance();
     SimpleDateFormat dateFormat= new SimpleDateFormat("hh:mm:ss");
     System.out.println(dateFormat.format(calendar.getTime()));
@@ -405,7 +406,10 @@ public class ReduceRecordProcessor extends RecordProcessor {
         addRowAndMaybeCheckAbort();
       }
     }
-    System.out.println("Profiling: GHive" +  InfoCollector.getVertexName() + " running ends at time:" + System.currentTimeMillis() + "ms");
+    long runEnd = System.currentTimeMillis();
+    System.out.println("Profiling: GHive " +  InfoCollector.getVertexName() + " running starts at time: " + runEnd + "ms");
+    System.out.println("Profiling: GHive " +  InfoCollector.getVertexName() + " takes time: " + (runEnd - runStart) + "ms");
+//    System.out.println("Profiling: GHive" +  InfoCollector.getVertexName() + " running ends at time:" + System.currentTimeMillis() + "ms");
     calendar= Calendar.getInstance();
     dateFormat= new SimpleDateFormat("hh:mm:ss");
     System.out.println(dateFormat.format(calendar.getTime()));
