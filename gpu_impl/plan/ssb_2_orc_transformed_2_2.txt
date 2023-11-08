@@ -1,0 +1,65 @@
+Plan optimized by CBO.
+
+Vertex dependency in root stage
+Map 1 <- Map 4 (BROADCAST_EDGE), Map 5 (BROADCAST_EDGE), Map 6 (BROADCAST_EDGE)
+Reducer 2 <- Map 1 (SIMPLE_EDGE)
+Reducer 3 <- Reducer 2 (SIMPLE_EDGE)
+
+Stage-0
+  Fetch Operator
+    limit:-1
+    Stage-1
+      Reducer 3 vectorized
+      File Output Operator [FS_68]
+        Select Operator [SEL_67] (rows=7984665 width=132)
+          Output:["_col0","_col1","_col2"]
+        <-Reducer 2 [SIMPLE_EDGE] vectorized
+          SHUFFLE [RS_66]
+            Select Operator [SEL_65] (rows=7984665 width=132)
+              Output:["_col0","_col1","_col2"]
+              Group By Operator [GBY_64] (rows=7984665 width=132)
+                Output:["_col0","_col1","_col2"],aggregations:["sum(VALUE._col0)"],keys:KEY._col0, KEY._col1
+              <-Map 1 [SIMPLE_EDGE] vectorized
+                SHUFFLE [RS_63]
+                  PartitionCols:_col0, _col1
+                  Group By Operator [GBY_62] (rows=15969331 width=132)
+                    Output:["_col0","_col1","_col2"],aggregations:["sum(_col3)"],keys:_col9, _col5
+                    Map Join Operator [MAPJOIN_61] (rows=15969331 width=132)
+                      Conds:MAPJOIN_60._col2=RS_56._col0(Inner),HybridGraceHashJoin:true,Output:["_col3","_col5","_col9"]
+                    <-Map 6 [BROADCAST_EDGE] vectorized
+                      BROADCAST [RS_56]
+                        PartitionCols:_col0
+                        Select Operator [SEL_55] (rows=2556 width=92)
+                          Output:["_col0","_col1"]
+                          Filter Operator [FIL_54] (rows=2556 width=92)
+                            predicate:d_datekey is not null
+                            TableScan [TS_9] (rows=2556 width=92)
+                              ssb_2_orc_transformed@dates,dates,Tbl:COMPLETE,Col:NONE,Output:["d_datekey","d_year"]
+                    <-Map Join Operator [MAPJOIN_60] (rows=14517574 width=132)
+                        Conds:MAPJOIN_59._col1=RS_53._col0(Inner),HybridGraceHashJoin:true,Output:["_col2","_col3","_col5"]
+                      <-Map 5 [BROADCAST_EDGE] vectorized
+                        BROADCAST [RS_53]
+                          PartitionCols:_col0
+                          Select Operator [SEL_52] (rows=2000 width=56)
+                            Output:["_col0"]
+                            Filter Operator [FIL_51] (rows=2000 width=56)
+                              predicate:((s_region = 2L) and s_suppkey is not null)
+                              TableScan [TS_6] (rows=4000 width=56)
+                                ssb_2_orc_transformed@supplier,supplier,Tbl:COMPLETE,Col:NONE,Output:["s_suppkey","s_region"]
+                      <-Map Join Operator [MAPJOIN_59] (rows=13197795 width=132)
+                          Conds:SEL_58._col0=RS_50._col0(Inner),HybridGraceHashJoin:true,Output:["_col1","_col2","_col3","_col5"]
+                        <-Map 4 [BROADCAST_EDGE] vectorized
+                          BROADCAST [RS_50]
+                            PartitionCols:_col0
+                            Select Operator [SEL_49] (rows=44444 width=68)
+                              Output:["_col0","_col1"]
+                              Filter Operator [FIL_48] (rows=44444 width=68)
+                                predicate:(UDFToDouble(p_brand1) BETWEEN 253.0D AND 260.0D and p_partkey is not null)
+                                TableScan [TS_3] (rows=400000 width=68)
+                                  ssb_2_orc_transformed@part,part,Tbl:COMPLETE,Col:NONE,Output:["p_partkey","p_brand1"]
+                        <-Select Operator [SEL_58] (rows=11997996 width=132)
+                            Output:["_col0","_col1","_col2","_col3"]
+                            Filter Operator [FIL_57] (rows=11997996 width=132)
+                              predicate:(lo_orderdate is not null and lo_partkey is not null and lo_suppkey is not null)
+                              TableScan [TS_0] (rows=11997996 width=132)
+                                ssb_2_orc_transformed@lineorder,lineorder,Tbl:COMPLETE,Col:NONE,Output:["lo_partkey","lo_suppkey","lo_orderdate","lo_revenue"]

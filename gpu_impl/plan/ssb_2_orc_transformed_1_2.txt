@@ -1,0 +1,38 @@
+Plan optimized by CBO.
+
+Vertex dependency in root stage
+Map 1 <- Map 3 (BROADCAST_EDGE)
+Reducer 2 <- Map 1 (CUSTOM_SIMPLE_EDGE)
+
+Stage-0
+  Fetch Operator
+    limit:-1
+    Stage-1
+      Reducer 2 vectorized
+      File Output Operator [FS_32]
+        Group By Operator [GBY_31] (rows=1 width=8)
+          Output:["_col0"],aggregations:["sum(VALUE._col0)"]
+        <-Map 1 [CUSTOM_SIMPLE_EDGE] vectorized
+          PARTITION_ONLY_SHUFFLE [RS_30]
+            Group By Operator [GBY_29] (rows=1 width=8)
+              Output:["_col0"],aggregations:["sum(_col0)"]
+              Select Operator [SEL_28] (rows=162935 width=132)
+                Output:["_col0"]
+                Map Join Operator [MAPJOIN_27] (rows=162935 width=132)
+                  Conds:SEL_26._col0=RS_24._col0(Inner),HybridGraceHashJoin:true,Output:["_col2","_col3"]
+                <-Map 3 [BROADCAST_EDGE] vectorized
+                  BROADCAST [RS_24]
+                    PartitionCols:_col0
+                    Select Operator [SEL_23] (rows=1278 width=92)
+                      Output:["_col0"]
+                      Filter Operator [FIL_22] (rows=1278 width=92)
+                        predicate:((d_yearmonthnum = 199401) and d_datekey is not null)
+                        TableScan [TS_3] (rows=2556 width=92)
+                          ssb_2_orc_transformed@dates,dates,Tbl:COMPLETE,Col:NONE,Output:["d_datekey","d_yearmonthnum"]
+                <-Select Operator [SEL_26] (rows=148123 width=132)
+                    Output:["_col0","_col2","_col3"]
+                    Filter Operator [FIL_25] (rows=148123 width=132)
+                      predicate:(lo_discount BETWEEN 4.0D AND 6.0D and lo_quantity BETWEEN 26.0D AND 35.0D and lo_orderdate is not null)
+                      TableScan [TS_0] (rows=11997996 width=132)
+                        ssb_2_orc_transformed@lineorder,lineorder,Tbl:COMPLETE,Col:NONE,Output:["lo_orderdate","lo_quantity","lo_extendedprice","lo_discount"]
+

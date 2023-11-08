@@ -1,0 +1,71 @@
+Plan optimized by CBO.
+
+Vertex dependency in root stage
+Map 1 <- Map 5 (BROADCAST_EDGE)
+Reducer 2 <- Map 1 (SIMPLE_EDGE), Map 6 (SIMPLE_EDGE), Map 7 (BROADCAST_EDGE)
+Reducer 3 <- Reducer 2 (SIMPLE_EDGE)
+Reducer 4 <- Reducer 3 (SIMPLE_EDGE)
+
+Stage-0
+  Fetch Operator
+    limit:-1
+    Stage-1
+      Reducer 4 vectorized
+      File Output Operator [FS_64]
+        Select Operator [SEL_63] (rows=39920719 width=132)
+          Output:["_col0","_col1","_col2","_col3"]
+        <-Reducer 3 [SIMPLE_EDGE] vectorized
+          SHUFFLE [RS_62]
+            Select Operator [SEL_61] (rows=39920719 width=132)
+              Output:["_col0","_col1","_col2","_col3"]
+              Group By Operator [GBY_60] (rows=39920719 width=132)
+                Output:["_col0","_col1","_col2","_col3"],aggregations:["sum(VALUE._col0)"],keys:KEY._col0, KEY._col1, KEY._col2
+              <-Reducer 2 [SIMPLE_EDGE]
+                SHUFFLE [RS_23]
+                  PartitionCols:_col0, _col1, _col2
+                  Group By Operator [GBY_22] (rows=79841439 width=132)
+                    Output:["_col0","_col1","_col2","_col3"],aggregations:["sum(_col3)"],keys:_col9, _col5, _col7
+                    Map Join Operator [MAPJOIN_44] (rows=79841439 width=132)
+                      Conds:MERGEJOIN_43._col2=RS_59._col0(Inner),HybridGraceHashJoin:true,Output:["_col3","_col5","_col7","_col9"]
+                    <-Map 7 [BROADCAST_EDGE] vectorized
+                      BROADCAST [RS_59]
+                        PartitionCols:_col0
+                        Select Operator [SEL_58] (rows=284 width=92)
+                          Output:["_col0","_col1"]
+                          Filter Operator [FIL_57] (rows=284 width=92)
+                            predicate:((d_year >= 1992) and (d_year <= 1997) and d_datekey is not null)
+                            TableScan [TS_9] (rows=2556 width=92)
+                              ssb_10_orc_transformed@dates,dates,Tbl:COMPLETE,Col:NONE,Output:["d_datekey","d_year"]
+                    <-Merge Join Operator [MERGEJOIN_43] (rows=72583125 width=132)
+                        Conds:RS_53._col0=RS_56._col0(Inner),Output:["_col2","_col3","_col5","_col7"]
+                      <-Map 1 [SIMPLE_EDGE] vectorized
+                        SHUFFLE [RS_53]
+                          PartitionCols:_col0
+                          Map Join Operator [MAPJOIN_52] (rows=65984658 width=132)
+                            Conds:SEL_51._col1=RS_49._col0(Inner),HybridGraceHashJoin:true,Output:["_col0","_col2","_col3","_col5"]
+                          <-Map 5 [BROADCAST_EDGE] vectorized
+                            BROADCAST [RS_49]
+                              PartitionCols:_col0
+                              Select Operator [SEL_48] (rows=20000 width=56)
+                                Output:["_col0","_col1"]
+                                Filter Operator [FIL_47] (rows=20000 width=56)
+                                  predicate:(((s_city = 221L) or (s_city = 225L)) and s_suppkey is not null)
+                                  TableScan [TS_3] (rows=20000 width=56)
+                                    ssb_10_orc_transformed@supplier,supplier,Tbl:COMPLETE,Col:NONE,Output:["s_suppkey","s_city"]
+                          <-Select Operator [SEL_51] (rows=59986052 width=132)
+                              Output:["_col0","_col1","_col2","_col3"]
+                              Filter Operator [FIL_50] (rows=59986052 width=132)
+                                predicate:(lo_custkey is not null and lo_suppkey is not null and lo_orderdate is not null)
+                                TableScan [TS_0] (rows=59986052 width=132)
+                                  ssb_10_orc_transformed@lineorder,lineorder,Tbl:COMPLETE,Col:NONE,Output:["lo_custkey","lo_suppkey","lo_orderdate","lo_revenue"]
+                      <-Map 6 [SIMPLE_EDGE] vectorized
+                        SHUFFLE [RS_56]
+                          PartitionCols:_col0
+                          Select Operator [SEL_55] (rows=300000 width=64)
+                            Output:["_col0","_col1"]
+                            Filter Operator [FIL_54] (rows=300000 width=64)
+                              predicate:(((c_city = 221L) or (c_city = 225L)) and c_custkey is not null)
+                              TableScan [TS_6] (rows=300000 width=64)
+                                ssb_10_orc_transformed@customer,customer,Tbl:COMPLETE,Col:NONE,Output:["c_custkey","c_city"]
+
+

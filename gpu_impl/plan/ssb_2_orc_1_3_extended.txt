@@ -1,0 +1,236 @@
+STAGE DEPENDENCIES:
+  Stage-1 is a root stage
+  Stage-0 depends on stages: Stage-1
+
+STAGE PLANS:
+  Stage: Stage-1
+    Tez
+      DagId: hive_20210706091906_99c15d82-bbb3-41c8-9b39-625264ed0c28:1
+      Edges:
+        Map 1 <- Map 3 (BROADCAST_EDGE)
+        Reducer 2 <- Map 1 (CUSTOM_SIMPLE_EDGE)
+      DagName: hive_20210706091906_99c15d82-bbb3-41c8-9b39-625264ed0c28:1
+      Vertices:
+        Map 1 
+            Map Operator Tree:
+                TableScan
+                  alias: lineorder
+                  Statistics: Num rows: 11997996 Data size: 4475252508 Basic stats: COMPLETE Column stats: NONE
+                  GatherStats: false
+                  Filter Operator
+                    isSamplingPred: false
+                    predicate: ((lo_discount = 6.0D) and lo_orderdate is not null) (type: boolean)
+                    Statistics: Num rows: 5998998 Data size: 2237626254 Basic stats: COMPLETE Column stats: NONE
+                    Select Operator
+                      expressions: lo_orderdate (type: bigint), lo_extendedprice (type: double)
+                      outputColumnNames: _col0, _col1
+                      Statistics: Num rows: 5998998 Data size: 2237626254 Basic stats: COMPLETE Column stats: NONE
+                      Map Join Operator
+                        condition map:
+                             Inner Join 0 to 1
+                        Estimated key counts: Map 3 => 1278
+                        keys:
+                          0 _col0 (type: bigint)
+                          1 _col0 (type: bigint)
+                        outputColumnNames: _col1
+                        input vertices:
+                          1 Map 3
+                        Position of Big Table: 0
+                        Statistics: Num rows: 6598897 Data size: 2461388932 Basic stats: COMPLETE Column stats: NONE
+                        HybridGraceHashJoin: true
+                        Select Operator
+                          expressions: (_col1 * 6.0D) (type: double)
+                          outputColumnNames: _col0
+                          Statistics: Num rows: 6598897 Data size: 2461388932 Basic stats: COMPLETE Column stats: NONE
+                          Group By Operator
+                            aggregations: sum(_col0)
+                            mode: hash
+                            outputColumnNames: _col0
+                            Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: NONE
+                            Reduce Output Operator
+                              null sort order: 
+                              sort order: 
+                              Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: NONE
+                              tag: -1
+                              value expressions: _col0 (type: double)
+                              auto parallelism: false
+            Execution mode: vectorized
+            Path -> Alias:
+              hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/lineorder [lineorder]
+            Path -> Partition:
+              hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/lineorder 
+                Partition
+                  base file name: lineorder
+                  input format: org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                  output format: org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                  properties:
+                    COLUMN_STATS_ACCURATE {"BASIC_STATS":"true"}
+                    bucket_count -1
+                    bucketing_version 2
+                    column.name.delimiter ,
+                    columns lo_orderkey,lo_linenumber,lo_custkey,lo_partkey,lo_suppkey,lo_orderdate,lo_ordpriority,lo_shippriority,lo_quantity,lo_extendedprice,lo_ordtotalprice,lo_discount,lo_revenue,lo_supplycost,lo_tax,lo_commitdate,lo_shipmode
+                    columns.comments 
+                    columns.types bigint:int:bigint:bigint:bigint:bigint:string:string:double:double:double:double:double:double:double:bigint:string
+                    file.inputformat org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                    file.outputformat org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                    location hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/lineorder
+                    name ssb_2_orc.lineorder
+                    numFiles 2
+                    numRows 11997996
+                    orc.compress NONE
+                    rawDataSize 4475252508
+                    serialization.ddl struct lineorder { i64 lo_orderkey, i32 lo_linenumber, i64 lo_custkey, i64 lo_partkey, i64 lo_suppkey, i64 lo_orderdate, string lo_ordpriority, string lo_shippriority, double lo_quantity, double lo_extendedprice, double lo_ordtotalprice, double lo_discount, double lo_revenue, double lo_supplycost, double lo_tax, i64 lo_commitdate, string lo_shipmode}
+                    serialization.format 1
+                    serialization.lib org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                    totalSize 845692752
+                    transient_lastDdlTime 1624849128
+                  serde: org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                
+                    input format: org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                    output format: org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                    properties:
+                      COLUMN_STATS_ACCURATE {"BASIC_STATS":"true"}
+                      bucket_count -1
+                      bucketing_version 2
+                      column.name.delimiter ,
+                      columns lo_orderkey,lo_linenumber,lo_custkey,lo_partkey,lo_suppkey,lo_orderdate,lo_ordpriority,lo_shippriority,lo_quantity,lo_extendedprice,lo_ordtotalprice,lo_discount,lo_revenue,lo_supplycost,lo_tax,lo_commitdate,lo_shipmode
+                      columns.comments 
+                      columns.types bigint:int:bigint:bigint:bigint:bigint:string:string:double:double:double:double:double:double:double:bigint:string
+                      file.inputformat org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                      file.outputformat org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                      location hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/lineorder
+                      name ssb_2_orc.lineorder
+                      numFiles 2
+                      numRows 11997996
+                      orc.compress NONE
+                      rawDataSize 4475252508
+                      serialization.ddl struct lineorder { i64 lo_orderkey, i32 lo_linenumber, i64 lo_custkey, i64 lo_partkey, i64 lo_suppkey, i64 lo_orderdate, string lo_ordpriority, string lo_shippriority, double lo_quantity, double lo_extendedprice, double lo_ordtotalprice, double lo_discount, double lo_revenue, double lo_supplycost, double lo_tax, i64 lo_commitdate, string lo_shipmode}
+                      serialization.format 1
+                      serialization.lib org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                      totalSize 845692752
+                      transient_lastDdlTime 1624849128
+                    serde: org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                    name: ssb_2_orc.lineorder
+                  name: ssb_2_orc.lineorder
+            Truncated Path -> Alias:
+              /ssb_2_orc.db/lineorder [lineorder]
+        Map 3 
+            Map Operator Tree:
+                TableScan
+                  alias: dates
+                  Statistics: Num rows: 2556 Data size: 1308672 Basic stats: COMPLETE Column stats: NONE
+                  GatherStats: false
+                  Filter Operator
+                    isSamplingPred: false
+                    predicate: ((d_yearmonthnum = 199401) and d_datekey is not null) (type: boolean)
+                    Statistics: Num rows: 1278 Data size: 654336 Basic stats: COMPLETE Column stats: NONE
+                    Select Operator
+                      expressions: d_datekey (type: bigint)
+                      outputColumnNames: _col0
+                      Statistics: Num rows: 1278 Data size: 654336 Basic stats: COMPLETE Column stats: NONE
+                      Reduce Output Operator
+                        key expressions: _col0 (type: bigint)
+                        null sort order: a
+                        sort order: +
+                        Map-reduce partition columns: _col0 (type: bigint)
+                        Statistics: Num rows: 1278 Data size: 654336 Basic stats: COMPLETE Column stats: NONE
+                        tag: 1
+                        auto parallelism: true
+            Execution mode: vectorized
+            Path -> Alias:
+              hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/dates [dates]
+            Path -> Partition:
+              hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/dates 
+                Partition
+                  base file name: dates
+                  input format: org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                  output format: org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                  properties:
+                    COLUMN_STATS_ACCURATE {"BASIC_STATS":"true"}
+                    bucket_count -1
+                    bucketing_version 2
+                    column.name.delimiter ,
+                    columns d_datekey,d_date,d_dayofweek,d_month,d_year,d_yearmonthnum,d_yearmonth,d_daynuminweek,d_daynuminmonth,d_daynuminyear,d_monthnuminyear,d_weeknuminyear,d_sellingseason,d_lastdayinweekfl,d_lastdayinmonthfl,d_holidayfl,d_weekdayfl
+                    columns.comments 
+                    columns.types bigint:string:string:string:int:int:string:int:int:int:int:int:string:int:int:int:int
+                    file.inputformat org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                    file.outputformat org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                    location hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/dates
+                    name ssb_2_orc.dates
+                    numFiles 1
+                    numRows 2556
+                    orc.compress NONE
+                    rawDataSize 1308672
+                    serialization.ddl struct dates { i64 d_datekey, string d_date, string d_dayofweek, string d_month, i32 d_year, i32 d_yearmonthnum, string d_yearmonth, i32 d_daynuminweek, i32 d_daynuminmonth, i32 d_daynuminyear, i32 d_monthnuminyear, i32 d_weeknuminyear, string d_sellingseason, i32 d_lastdayinweekfl, i32 d_lastdayinmonthfl, i32 d_holidayfl, i32 d_weekdayfl}
+                    serialization.format 1
+                    serialization.lib org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                    totalSize 64214
+                    transient_lastDdlTime 1624849091
+                  serde: org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                
+                    input format: org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                    output format: org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                    properties:
+                      COLUMN_STATS_ACCURATE {"BASIC_STATS":"true"}
+                      bucket_count -1
+                      bucketing_version 2
+                      column.name.delimiter ,
+                      columns d_datekey,d_date,d_dayofweek,d_month,d_year,d_yearmonthnum,d_yearmonth,d_daynuminweek,d_daynuminmonth,d_daynuminyear,d_monthnuminyear,d_weeknuminyear,d_sellingseason,d_lastdayinweekfl,d_lastdayinmonthfl,d_holidayfl,d_weekdayfl
+                      columns.comments 
+                      columns.types bigint:string:string:string:int:int:string:int:int:int:int:int:string:int:int:int:int
+                      file.inputformat org.apache.hadoop.hive.ql.io.orc.OrcInputFormat
+                      file.outputformat org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat
+                      location hdfs://dbg20:9000/hive-3.1.0/ssb_2_orc.db/dates
+                      name ssb_2_orc.dates
+                      numFiles 1
+                      numRows 2556
+                      orc.compress NONE
+                      rawDataSize 1308672
+                      serialization.ddl struct dates { i64 d_datekey, string d_date, string d_dayofweek, string d_month, i32 d_year, i32 d_yearmonthnum, string d_yearmonth, i32 d_daynuminweek, i32 d_daynuminmonth, i32 d_daynuminyear, i32 d_monthnuminyear, i32 d_weeknuminyear, string d_sellingseason, i32 d_lastdayinweekfl, i32 d_lastdayinmonthfl, i32 d_holidayfl, i32 d_weekdayfl}
+                      serialization.format 1
+                      serialization.lib org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                      totalSize 64214
+                      transient_lastDdlTime 1624849091
+                    serde: org.apache.hadoop.hive.ql.io.orc.OrcSerde
+                    name: ssb_2_orc.dates
+                  name: ssb_2_orc.dates
+            Truncated Path -> Alias:
+              /ssb_2_orc.db/dates [dates]
+        Reducer 2 
+            Execution mode: vectorized
+            Needs Tagging: false
+            Reduce Operator Tree:
+              Group By Operator
+                aggregations: sum(VALUE._col0)
+                mode: mergepartial
+                outputColumnNames: _col0
+                Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: NONE
+                File Output Operator
+                  compressed: false
+                  GlobalTableId: 0
+                  directory: hdfs://dbg20:9000/tmp/hive/hive/c4f4d7c1-c7ec-4ae8-bb50-f04953e91bb8/hive_2021-07-06_09-19-06_800_6610108064997519528-1/-mr-10001/.hive-staging_hive_2021-07-06_09-19-06_800_6610108064997519528-1/-ext-10002
+                  NumFilesPerFileSink: 1
+                  Statistics: Num rows: 1 Data size: 8 Basic stats: COMPLETE Column stats: NONE
+                  Stats Publishing Key Prefix: hdfs://dbg20:9000/tmp/hive/hive/c4f4d7c1-c7ec-4ae8-bb50-f04953e91bb8/hive_2021-07-06_09-19-06_800_6610108064997519528-1/-mr-10001/.hive-staging_hive_2021-07-06_09-19-06_800_6610108064997519528-1/-ext-10002/
+                  table:
+                      input format: org.apache.hadoop.mapred.SequenceFileInputFormat
+                      output format: org.apache.hadoop.hive.ql.io.HiveSequenceFileOutputFormat
+                      properties:
+                        columns _col0
+                        columns.types double
+                        escape.delim \
+                        hive.serialization.extend.additional.nesting.levels true
+                        serialization.escape.crlf true
+                        serialization.format 1
+                        serialization.lib org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+                      serde: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+                  TotalFiles: 1
+                  GatherStats: false
+                  MultiFileSpray: false
+
+  Stage: Stage-0
+    Fetch Operator
+      limit: -1
+      Processor Tree:
+        ListSink
+

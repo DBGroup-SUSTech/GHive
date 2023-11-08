@@ -1,0 +1,117 @@
+Plan optimized by CBO.
+
+Vertex dependency in root stage
+Map 7 <- Map 1 (BROADCAST_EDGE), Map 10 (BROADCAST_EDGE)
+Reducer 4 <- Map 3 (SIMPLE_EDGE), Reducer 9 (SIMPLE_EDGE)
+Reducer 5 <- Reducer 4 (SIMPLE_EDGE), Reducer 8 (SIMPLE_EDGE)
+Reducer 6 <- Reducer 5 (SIMPLE_EDGE)
+Reducer 8 <- Map 7 (SIMPLE_EDGE)
+Reducer 9 <- Map 2 (CUSTOM_SIMPLE_EDGE), Map 7 (SIMPLE_EDGE)
+
+Stage-0
+  Fetch Operator
+    limit:100
+    Stage-1
+      Reducer 6 vectorized
+      File Output Operator [FS_118]
+        Limit [LIM_117] (rows=100 width=151)
+          Number of rows:100
+          Select Operator [SEL_116] (rows=7026479 width=151)
+            Output:["_col0"]
+          <-Reducer 5 [SIMPLE_EDGE]
+            SHUFFLE [RS_50]
+              Select Operator [SEL_49] (rows=7026479 width=151)
+                Output:["_col0"]
+                Filter Operator [FIL_48] (rows=7026479 width=151)
+                  predicate:(_col2 > _col7)
+                  Merge Join Operator [MERGEJOIN_81] (rows=21079437 width=151)
+                    Conds:RS_45._col1=RS_115._col1(Inner),Output:["_col2","_col6","_col7"]
+                  <-Reducer 4 [SIMPLE_EDGE]
+                    SHUFFLE [RS_45]
+                      PartitionCols:_col1
+                      Merge Join Operator [MERGEJOIN_79] (rows=19163125 width=151)
+                        Conds:RS_110._col0=RS_87._col0(Inner),Output:["_col1","_col2","_col6"]
+                      <-Map 3 [SIMPLE_EDGE] vectorized
+                        SHUFFLE [RS_87]
+                          PartitionCols:_col0
+                          Select Operator [SEL_86] (rows=2000000 width=130)
+                            Output:["_col0","_col1"]
+                            Filter Operator [FIL_85] (rows=2000000 width=130)
+                              predicate:c_customer_sk is not null
+                              TableScan [TS_17] (rows=2000000 width=130)
+                                tpcds_orc_100_transformed@customer,customer,Tbl:COMPLETE,Col:NONE,Output:["c_customer_sk","c_customer_id"]
+                      <-Reducer 9 [SIMPLE_EDGE] vectorized
+                        SHUFFLE [RS_110]
+                          PartitionCols:_col0
+                          Map Join Operator [MAPJOIN_109] (rows=17421023 width=151)
+                            BucketMapJoin:true,Conds:SEL_108._col1=RS_106._col0(Inner),HybridGraceHashJoin:true,Output:["_col0","_col1","_col2"]
+                          <-Map 2 [CUSTOM_SIMPLE_EDGE] vectorized
+                            PARTITION_ONLY_SHUFFLE [RS_106]
+                              PartitionCols:_col0
+                              Select Operator [SEL_105] (rows=201 width=205)
+                                Output:["_col0"]
+                                Filter Operator [FIL_104] (rows=201 width=205)
+                                  predicate:((s_state = 3L) and s_store_sk is not null)
+                                  TableScan [TS_14] (rows=402 width=205)
+                                    tpcds_orc_100_transformed@store,store,Tbl:COMPLETE,Col:NONE,Output:["s_store_sk","s_state"]
+                          <-Select Operator [SEL_108] (rows=15837294 width=151)
+                              Output:["_col0","_col1","_col2"]
+                              Group By Operator [GBY_107] (rows=15837294 width=151)
+                                Output:["_col0","_col1","_col2"],aggregations:["sum(VALUE._col0)"],keys:KEY._col0, KEY._col1
+                              <-Map 7 [SIMPLE_EDGE] vectorized
+                                SHUFFLE [RS_103]
+                                  PartitionCols:_col0, _col1
+                                  Group By Operator [GBY_101] (rows=31674588 width=151)
+                                    Output:["_col0","_col1","_col2"],aggregations:["sum(_col3)"],keys:_col2, _col1
+                                    Map Join Operator [MAPJOIN_99] (rows=31674588 width=151)
+                                      Conds:SEL_97._col0=RS_90._col0(Inner),HybridGraceHashJoin:true,Output:["_col1","_col2","_col3"]
+                                    <-Map 1 [BROADCAST_EDGE] vectorized
+                                      BROADCAST [RS_90]
+                                        PartitionCols:_col0
+                                        Select Operator [SEL_89] (rows=36524 width=164)
+                                          Output:["_col0"]
+                                          Filter Operator [FIL_88] (rows=36524 width=164)
+                                            predicate:((d_year = 2000) and d_date_sk is not null)
+                                            TableScan [TS_3] (rows=73049 width=164)
+                                              tpcds_orc_100_transformed@date_dim,date_dim,Tbl:COMPLETE,Col:NONE,Output:["d_date_sk","d_year"]
+                                    <-Select Operator [SEL_97] (rows=28795080 width=151)
+                                        Output:["_col0","_col1","_col2","_col3"]
+                                        Filter Operator [FIL_95] (rows=28795080 width=151)
+                                          predicate:(sr_returned_date_sk is not null and sr_store_sk is not null and sr_customer_sk is not null)
+                                          TableScan [TS_20] (rows=28795080 width=151)
+                                            tpcds_orc_100_transformed@store_returns,store_returns,Tbl:COMPLETE,Col:NONE,Output:["sr_returned_date_sk","sr_customer_sk","sr_store_sk","sr_fee"]
+                                          <-Map 10 [BROADCAST_EDGE] vectorized
+                                            BROADCAST [RS_93]
+                                              PartitionCols:_col0
+                                              Select Operator [SEL_92] (rows=36524 width=164)
+                                                Output:["_col0"]
+                                                Filter Operator [FIL_91] (rows=36524 width=164)
+                                                  predicate:((d_year = 2000) and d_date_sk is not null)
+                                                  TableScan [TS_23] (rows=73049 width=164)
+                                                    tpcds_orc_100_transformed@date_dim,date_dim,Tbl:COMPLETE,Col:NONE,Output:["d_date_sk","d_year"]
+                  <-Reducer 8 [SIMPLE_EDGE] vectorized
+                    SHUFFLE [RS_115]
+                      PartitionCols:_col1
+                      Select Operator [SEL_114] (rows=7918647 width=151)
+                        Output:["_col0","_col1"]
+                        Group By Operator [GBY_113] (rows=7918647 width=151)
+                          Output:["_col0","_col1","_col2"],aggregations:["sum(_col2)","count(_col2)"],keys:_col1
+                          Select Operator [SEL_112] (rows=15837294 width=151)
+                            Output:["_col1","_col2"]
+                            Group By Operator [GBY_111] (rows=15837294 width=151)
+                              Output:["_col0","_col1","_col2"],aggregations:["sum(VALUE._col0)"],keys:KEY._col0, KEY._col1
+                            <-Map 7 [SIMPLE_EDGE] vectorized
+                              SHUFFLE [RS_102]
+                                PartitionCols:_col0
+                                Group By Operator [GBY_100] (rows=31674588 width=151)
+                                  Output:["_col0","_col1","_col2"],aggregations:["sum(_col3)"],keys:_col2, _col1
+                                  Map Join Operator [MAPJOIN_98] (rows=31674588 width=151)
+                                    Conds:SEL_96._col0=RS_93._col0(Inner),HybridGraceHashJoin:true,Output:["_col1","_col2","_col3"]
+                                  <- Please refer to the previous Map 10 [BROADCAST_EDGE]
+                                  <-Select Operator [SEL_96] (rows=28795080 width=151)
+                                      Output:["_col0","_col1","_col2","_col3"]
+                                      Filter Operator [FIL_94] (rows=28795080 width=151)
+                                        predicate:(sr_returned_date_sk is not null and sr_store_sk is not null)
+                                         Please refer to the previous TableScan [TS_20]
+
+
